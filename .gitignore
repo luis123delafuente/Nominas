@@ -7,3 +7,5 @@ data/*.db
 entrada/*.pdf
 salida/*.pdf
 logs/*.log
+
+config.local.py

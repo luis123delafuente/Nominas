@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Revisar nóminas - MEDIFORM PLUS</title>
+</head>
+<body>
+  <h1>Revisión de nóminas detectadas</h1>
+
+  {% if resumen is not none %}
+    <h2>Resumen simulado de envío</h2>
+    {% if resumen %}
+      <ul>
+        {% for item in resumen %}
+          <li>{{ item.empleado }} — {{ item.email or "SIN EMAIL" }} — archivo cifrado generado: {{ item.archivo }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No se ha confirmado ninguna nómina para enviar.</p>
+    {% endif %}
+    <p><em>Nota: esto es una simulación. Todavía no se ha enviado ningún correo (eso llega en la Fase 6).</em></p>
+    <hr>
+  {% endif %}
+
+  <form action="/revisar/confirmar" method="post">
+    <table border="1" cellpadding="6" cellspacing="0">
+      <tr>
+        <th>#</th>
+        <th>Nombre (PDF)</th>
+        <th>DNI (PDF)</th>
+        <th>Empleado emparejado</th>
+        <th>Email</th>
+        <th>Estado del match</th>
+        <th>Score nombre</th>
+        <th>Vista previa</th>
+        <th>Incluir en envío</th>
+      </tr>
+      {% for fila in filas %}
+        {% if fila.metodo == "dni_exacto" %}
+          {% set color = "#d4edda" %}
+        {% elif fila.metodo == "dni_con_alerta_nombre" %}
+          {% set color = "#fff3cd" %}
+        {% elif fila.metodo == "fuzzy_nombre" %}
+          {% set color = "#fff3cd" %}
+        {% else %}
+          {% set color = "#f8d7da" %}
+        {% endif %}
+        <tr style="background-color: {{ color }}">
+          <td>{{ fila.numero }}</td>
+          <td>{{ fila.nombre_pdf }}</td>
+          <td>{{ fila.dni_pdf or "—" }}</td>
+          <td>{{ fila.empleado_nombre or "(sin empleado emparejado)" }}</td>
+          <td>{{ fila.empleado_email or "—" }}</td>
+          <td>
+            {% if fila.metodo == "dni_exacto" %}
+              ✅ DNI exacto — autoconfirmado
+            {% elif fila.metodo == "dni_con_alerta_nombre" %}
+              ⚠️ DNI coincide pero el nombre no cuadra — revisar a mano:
+              <br>PDF: "{{ fila.nombre_pdf }}" vs. ficha: "{{ fila.empleado_nombre }}"
+            {% elif fila.metodo == "fuzzy_nombre" %}
+              🔎 Coincidencia por nombre (sin DNI en la nómina) — revisar a mano
+            {% else %}
+              ❌ Sin match — hay que dar de alta al empleado o corregir su ficha
+            {% endif %}
+          </td>
+          <td>{{ "%.1f"|format(fila.score_nombre) }}</td>
+          <td>
+            <details>
+              <summary>Ver</summary>
+              <iframe src="/revisar/preview/{{ fila.numero }}" width="400" height="500"></iframe>
+            </details>
+          </td>
+          <td>
+            {% if fila.metodo == "sin_match" %}
+              no disponible
+            {% else %}
+              <input type="checkbox" name="incluir" value="{{ fila.numero }}" {% if fila.incluir_por_defecto %}checked{% endif %}>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+    <p><button type="submit">Enviar (simulado)</button></p>
+  </form>
+
+  <p><a href="/">Subir otro PDF</a></p>
+</body>
+</html>

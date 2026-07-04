@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Subir nóminas - MEDIFORM PLUS</title>
+</head>
+<body>
+  <h1>Subir PDF mensual de nóminas</h1>
+
+  {% if error %}
+    <p style="color:red"><strong>Error:</strong> {{ error }}</p>
+  {% endif %}
+
+  <form action="/subir" method="post" enctype="multipart/form-data">
+    <input type="file" name="pdf" accept="application/pdf" required>
+    <button type="submit">Subir y analizar</button>
+  </form>
+</body>
+</html>
