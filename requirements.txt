@@ -6,4 +6,5 @@ pymupdf
 pypdf
 cryptography
 rapidfuzz
+openpyxl
 pytest

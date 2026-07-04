@@ -30,17 +30,6 @@ CREATE TABLE IF NOT EXISTS envios_log (
 """
 
 
-def get_connection(db_path=DB_PATH) -> sqlite3.Connection:
-    if db_path != ":memory:":
-        db_path = Path(db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
 def _migrar_envios_log(conn: sqlite3.Connection) -> None:
     """Añade columnas nuevas a bases de datos creadas antes de que existieran
     (CREATE TABLE IF NOT EXISTS no altera tablas ya existentes)."""
@@ -53,6 +42,21 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrar_envios_log(conn)
     conn.commit()
+
+
+def get_connection(db_path=DB_PATH) -> sqlite3.Connection:
+    """Abre la conexión y deja el esquema al día (tablas + migraciones) antes de devolverla,
+    para que cualquier script que solo importe app.db funcione sobre una BD nueva o antigua
+    sin tener que acordarse de llamar a init_db() aparte."""
+    if db_path != ":memory:":
+        db_path = Path(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_db(conn)
+    return conn
 
 
 def crear_empleado(conn: sqlite3.Connection, nombre_completo: str, dni_nie: str, email: str, fecha_alta: str) -> int:

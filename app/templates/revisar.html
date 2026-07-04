@@ -5,20 +5,33 @@
   <title>Revisar nóminas - MEDIFORM PLUS</title>
 </head>
 <body>
-  <h1>Revisión de nóminas detectadas</h1>
+  <h1>Revisión de nóminas detectadas — nómina de {{ mes_nomina }}</h1>
 
-  {% if resumen is not none %}
-    <h2>Resumen simulado de envío</h2>
-    {% if resumen %}
+  <p>
+    <strong>Modo de envío: {{ "PRUEBA" if modo_envio == "prueba" else "PRODUCCIÓN" }}</strong>
+    {% if modo_envio == "prueba" %}
+      — todos los correos llegarán a tu email de pruebas, nunca al empleado real.
+    {% else %}
+      — los correos irán al email real de cada empleado.
+    {% endif %}
+  </p>
+
+  {% if resultados is not none %}
+    <h2>Resultado del envío</h2>
+    {% if resultados %}
       <ul>
-        {% for item in resumen %}
-          <li>{{ item.empleado }} — {{ item.email or "SIN EMAIL" }} — archivo cifrado generado: {{ item.archivo }}</li>
+        {% for r in resultados %}
+          <li>
+            {% if r.estado == "enviado" %}✅{% else %}❌{% endif %}
+            empleado_id {{ r.empleado_id }} — {{ r.estado }} — enviado a: {{ r.email_destino }}
+            {% if r.email_produccion %} (destinatario real en producción: {{ r.email_produccion }}){% endif %}
+            {% if r.detalle %} — detalle: {{ r.detalle }}{% endif %}
+          </li>
         {% endfor %}
       </ul>
     {% else %}
       <p>No se ha confirmado ninguna nómina para enviar.</p>
     {% endif %}
-    <p><em>Nota: esto es una simulación. Todavía no se ha enviado ningún correo (eso llega en la Fase 6).</em></p>
     <hr>
   {% endif %}
 
@@ -80,7 +93,7 @@
         </tr>
       {% endfor %}
     </table>
-    <p><button type="submit">Enviar (simulado)</button></p>
+    <p><button type="submit">Enviar</button></p>
   </form>
 
   <p><a href="/">Subir otro PDF</a></p>

@@ -12,8 +12,34 @@
   {% endif %}
 
   <form action="/subir" method="post" enctype="multipart/form-data">
-    <input type="file" name="pdf" accept="application/pdf" required>
+    <p>
+      <input type="file" id="pdf" name="pdf" accept="application/pdf" required>
+    </p>
+    <p>
+      <label for="mes_nomina">Mes de la nómina (AAAA-MM):</label>
+      <input type="text" id="mes_nomina" name="mes_nomina" pattern="\d{4}-\d{2}" value="{{ mes_nomina_por_defecto }}" required>
+      <small>Se rellena solo al elegir el archivo si el nombre lo permite — puedes corregirlo antes de subir.</small>
+    </p>
     <button type="submit">Subir y analizar</button>
   </form>
+
+  <script>
+    // JS mínimo: si el nombre del archivo sigue el patrón NOMINAS_MMAAAA.pdf,
+    // rellena el mes automáticamente. Si no, se deja el valor por defecto
+    // (el mes actual) para que el usuario lo edite a mano.
+    document.getElementById("pdf").addEventListener("change", function (evento) {
+      var archivo = evento.target.files[0];
+      if (!archivo) return;
+
+      var coincidencia = archivo.name.match(/NOMINAS[_-]?(\d{2})(\d{4})/i);
+      if (coincidencia) {
+        var mes = coincidencia[1];
+        var anio = coincidencia[2];
+        if (mes >= "01" && mes <= "12") {
+          document.getElementById("mes_nomina").value = anio + "-" + mes;
+        }
+      }
+    });
+  </script>
 </body>
 </html>

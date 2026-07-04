@@ -1,16 +1,22 @@
 import io
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pypdf import PdfReader
 
+from app.config import cargar_configuracion
 from app.crypto import cifrar_paginas
-from app.db import get_connection, init_db, listar_empleados
+from app.db import get_connection, listar_empleados
+from app.mailer_macos import enviar_nomina
 from app.matcher import emparejar_nomina
 from app.pdf_parser import ParserError, detectar_nominas, extraer_paginas_bytes, nombre_archivo_seguro
+
+MES_NOMINA_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENTRADA_DIR = BASE_DIR / "entrada"
@@ -19,9 +25,7 @@ SALIDA_DIR = BASE_DIR / "salida"
 app = FastAPI(title="Nominas MEDIFORM PLUS")
 templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 
-_conn_inicial = get_connection()
-init_db(_conn_inicial)
-_conn_inicial.close()
+get_connection().close()  # asegura el esquema/migraciones al arrancar la app
 
 
 @dataclass
@@ -43,6 +47,7 @@ class FilaRevision:
 @dataclass
 class LoteRevision:
     ruta_pdf_maestro: str
+    mes_nomina: str
     filas: list[FilaRevision] = field(default_factory=list)
 
 
@@ -51,12 +56,21 @@ estado_actual: LoteRevision | None = None
 
 @app.get("/")
 def index(request: Request):
-    return templates.TemplateResponse(request, "subir.html", {"error": None})
+    mes_actual = datetime.now().strftime("%Y-%m")
+    return templates.TemplateResponse(request, "subir.html", {"error": None, "mes_nomina_por_defecto": mes_actual})
 
 
 @app.post("/subir")
-def subir_pdf(request: Request, pdf: UploadFile = File(...)):
+def subir_pdf(request: Request, pdf: UploadFile = File(...), mes_nomina: str = Form(...)):
     global estado_actual
+
+    if not MES_NOMINA_PATTERN.match(mes_nomina):
+        return templates.TemplateResponse(
+            request,
+            "subir.html",
+            {"error": f"Mes de nómina inválido: '{mes_nomina}' (formato esperado AAAA-MM)", "mes_nomina_por_defecto": mes_nomina},
+            status_code=400,
+        )
 
     ENTRADA_DIR.mkdir(parents=True, exist_ok=True)
     ruta_maestro = ENTRADA_DIR / pdf.filename
@@ -66,7 +80,9 @@ def subir_pdf(request: Request, pdf: UploadFile = File(...)):
     try:
         nominas = detectar_nominas(str(ruta_maestro))
     except ParserError as exc:
-        return templates.TemplateResponse(request, "subir.html", {"error": str(exc)}, status_code=400)
+        return templates.TemplateResponse(
+            request, "subir.html", {"error": str(exc), "mes_nomina_por_defecto": mes_nomina}, status_code=400
+        )
 
     conn = get_connection()
     try:
@@ -95,7 +111,7 @@ def subir_pdf(request: Request, pdf: UploadFile = File(...)):
             )
         )
 
-    estado_actual = LoteRevision(ruta_pdf_maestro=str(ruta_maestro), filas=filas)
+    estado_actual = LoteRevision(ruta_pdf_maestro=str(ruta_maestro), mes_nomina=mes_nomina, filas=filas)
     return RedirectResponse(url="/revisar", status_code=303)
 
 
@@ -103,7 +119,17 @@ def subir_pdf(request: Request, pdf: UploadFile = File(...)):
 def revisar(request: Request):
     if estado_actual is None:
         return RedirectResponse(url="/")
-    return templates.TemplateResponse(request, "revisar.html", {"filas": estado_actual.filas, "resumen": None})
+    config = cargar_configuracion()
+    return templates.TemplateResponse(
+        request,
+        "revisar.html",
+        {
+            "filas": estado_actual.filas,
+            "mes_nomina": estado_actual.mes_nomina,
+            "modo_envio": config.modo_envio,
+            "resultados": None,
+        },
+    )
 
 
 @app.get("/revisar/preview/{numero}")
@@ -130,26 +156,43 @@ async def confirmar(request: Request):
 
     SALIDA_DIR.mkdir(parents=True, exist_ok=True)
     reader = PdfReader(estado_actual.ruta_pdf_maestro)
+    config = cargar_configuracion()
 
-    resumen = []
-    for fila in estado_actual.filas:
-        if fila.metodo == "sin_match":
-            continue  # nunca se puede forzar el envío de una nómina sin emparejar
-        if fila.numero not in numeros_incluidos:
-            continue
+    conn = get_connection()
+    try:
+        resultados = []
+        for fila in estado_actual.filas:
+            if fila.metodo == "sin_match":
+                continue  # nunca se puede forzar el envío de una nómina sin emparejar
+            if fila.numero not in numeros_incluidos:
+                continue
 
-        password = fila.dni_pdf if fila.metodo in ("dni_exacto", "dni_con_alerta_nombre") else fila.empleado_dni
-        nombre_archivo = f"{fila.numero:02d}_{nombre_archivo_seguro(fila.empleado_nombre)}.pdf"
-        ruta_salida = SALIDA_DIR / nombre_archivo
+            password = fila.dni_pdf if fila.metodo in ("dni_exacto", "dni_con_alerta_nombre") else fila.empleado_dni
+            nombre_archivo = f"{fila.numero:02d}_{nombre_archivo_seguro(fila.empleado_nombre)}.pdf"
+            ruta_salida = SALIDA_DIR / nombre_archivo
 
-        cifrar_paginas(reader, range(fila.pagina_inicio, fila.pagina_fin + 1), str(ruta_salida), password)
+            cifrar_paginas(reader, range(fila.pagina_inicio, fila.pagina_fin + 1), str(ruta_salida), password)
 
-        resumen.append(
-            {
-                "empleado": fila.empleado_nombre,
-                "email": fila.empleado_email,
-                "archivo": nombre_archivo,
-            }
-        )
+            resultado = enviar_nomina(
+                conn,
+                fila.empleado_id,
+                fila.empleado_nombre,
+                fila.empleado_email,
+                estado_actual.mes_nomina,
+                str(ruta_salida),
+                config,
+            )
+            resultados.append(resultado)
+    finally:
+        conn.close()
 
-    return templates.TemplateResponse(request, "revisar.html", {"filas": estado_actual.filas, "resumen": resumen})
+    return templates.TemplateResponse(
+        request,
+        "revisar.html",
+        {
+            "filas": estado_actual.filas,
+            "mes_nomina": estado_actual.mes_nomina,
+            "modo_envio": config.modo_envio,
+            "resultados": resultados,
+        },
+    )

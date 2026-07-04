@@ -9,3 +9,4 @@ salida/*.pdf
 logs/*.log
 
 config.local.py
+*.xlsx
