@@ -100,6 +100,15 @@ def dar_baja_empleado(conn: sqlite3.Connection, empleado_id: int, fecha_baja: st
     conn.commit()
 
 
+def reactivar_empleado(conn: sqlite3.Connection, empleado_id: int) -> None:
+    """Deshace una baja: vuelve a marcar al empleado como activo y borra su fecha_baja."""
+    conn.execute(
+        "UPDATE empleados SET activo = 1, fecha_baja = NULL WHERE id = ?",
+        (empleado_id,),
+    )
+    conn.commit()
+
+
 def registrar_envio(
     conn: sqlite3.Connection,
     fecha_hora: str,

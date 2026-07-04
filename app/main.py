@@ -1,8 +1,10 @@
 import io
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -11,12 +13,21 @@ from pypdf import PdfReader
 
 from app.config import cargar_configuracion
 from app.crypto import cifrar_paginas
-from app.db import get_connection, listar_empleados
+from app.db import (
+    actualizar_empleado,
+    crear_empleado,
+    dar_baja_empleado,
+    get_connection,
+    listar_empleados,
+    obtener_empleado,
+    reactivar_empleado,
+)
 from app.mailer_macos import enviar_nomina
 from app.matcher import emparejar_nomina
-from app.pdf_parser import ParserError, detectar_nominas, extraer_paginas_bytes, nombre_archivo_seguro
+from app.pdf_parser import DNI_NIE_PATTERN, ParserError, detectar_nominas, extraer_paginas_bytes, nombre_archivo_seguro
 
 MES_NOMINA_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENTRADA_DIR = BASE_DIR / "entrada"
@@ -196,3 +207,139 @@ async def confirmar(request: Request):
             "resultados": resultados,
         },
     )
+
+
+def _valores_formulario_vacios() -> dict:
+    return {"id": "", "nombre_completo": "", "dni_nie": "", "email": ""}
+
+
+@app.get("/empleados")
+def empleados_vista(
+    request: Request,
+    mostrar_baja: bool = False,
+    editar_id: int | None = None,
+    mensaje: str | None = None,
+):
+    conn = get_connection()
+    try:
+        empleados = listar_empleados(conn, solo_activos=not mostrar_baja)
+
+        valores = _valores_formulario_vacios()
+        if editar_id is not None:
+            empleado = obtener_empleado(conn, editar_id)
+            if empleado is not None:
+                valores = {
+                    "id": str(empleado["id"]),
+                    "nombre_completo": empleado["nombre_completo"],
+                    "dni_nie": empleado["dni_nie"],
+                    "email": empleado["email"],
+                }
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request,
+        "empleados.html",
+        {
+            "empleados": empleados,
+            "mostrar_baja": mostrar_baja,
+            "valores": valores,
+            "mensaje": mensaje,
+            "error": None,
+        },
+    )
+
+
+@app.post("/empleados/guardar")
+def empleados_guardar(
+    request: Request,
+    empleado_id: str = Form(""),
+    nombre_completo: str = Form(...),
+    dni_nie: str = Form(...),
+    email: str = Form(...),
+):
+    nombre_completo = nombre_completo.strip()
+    dni_nie_normalizado = dni_nie.strip().upper().replace(" ", "")
+    email = email.strip()
+    valores = {"id": empleado_id, "nombre_completo": nombre_completo, "dni_nie": dni_nie, "email": email}
+
+    errores = []
+    if not nombre_completo:
+        errores.append("El nombre completo no puede estar vacío.")
+    if not DNI_NIE_PATTERN.match(dni_nie_normalizado):
+        errores.append(f"DNI/NIE con formato inválido: '{dni_nie}'.")
+    if not EMAIL_PATTERN.match(email):
+        errores.append(f"Email con formato inválido: '{email}'.")
+
+    mensaje = None
+    if not errores:
+        conn = get_connection()
+        try:
+            if empleado_id:
+                actualizar_empleado(
+                    conn,
+                    int(empleado_id),
+                    nombre_completo=nombre_completo,
+                    dni_nie=dni_nie_normalizado,
+                    email=email,
+                )
+                mensaje = f"Empleado actualizado: {nombre_completo}"
+            else:
+                crear_empleado(conn, nombre_completo, dni_nie_normalizado, email, datetime.now().date().isoformat())
+                mensaje = f"Empleado dado de alta: {nombre_completo}"
+        except sqlite3.IntegrityError:
+            accion = "otro empleado" if empleado_id else "un empleado"
+            errores.append(f"Ya existe {accion} con el DNI {dni_nie_normalizado}.")
+        finally:
+            conn.close()
+
+    if errores:
+        conn = get_connection()
+        try:
+            empleados = listar_empleados(conn, solo_activos=True)
+        finally:
+            conn.close()
+        return templates.TemplateResponse(
+            request,
+            "empleados.html",
+            {
+                "empleados": empleados,
+                "mostrar_baja": False,
+                "valores": valores,
+                "mensaje": None,
+                "error": " ".join(errores),
+            },
+            status_code=400,
+        )
+
+    return RedirectResponse(url=f"/empleados?mensaje={quote(mensaje)}", status_code=303)
+
+
+@app.post("/empleados/{empleado_id}/baja")
+def empleados_dar_baja(empleado_id: int):
+    conn = get_connection()
+    try:
+        empleado = obtener_empleado(conn, empleado_id)
+        if empleado is None:
+            raise HTTPException(status_code=404, detail="Empleado no encontrado")
+        dar_baja_empleado(conn, empleado_id, datetime.now().date().isoformat())
+        mensaje = f"Empleado dado de baja: {empleado['nombre_completo']}"
+    finally:
+        conn.close()
+
+    return RedirectResponse(url=f"/empleados?mensaje={quote(mensaje)}", status_code=303)
+
+
+@app.post("/empleados/{empleado_id}/reactivar")
+def empleados_reactivar(empleado_id: int):
+    conn = get_connection()
+    try:
+        empleado = obtener_empleado(conn, empleado_id)
+        if empleado is None:
+            raise HTTPException(status_code=404, detail="Empleado no encontrado")
+        reactivar_empleado(conn, empleado_id)
+        mensaje = f"Empleado reactivado: {empleado['nombre_completo']}"
+    finally:
+        conn.close()
+
+    return RedirectResponse(url=f"/empleados?mensaje={quote(mensaje)}", status_code=303)

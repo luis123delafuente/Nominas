@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Empleados - MEDIFORM PLUS</title>
+</head>
+<body>
+  <p><a href="/">Subir nómina</a></p>
+
+  <h1>Gestión de empleados</h1>
+
+  {% if mensaje %}
+    <p style="color:green"><strong>{{ mensaje }}</strong></p>
+  {% endif %}
+  {% if error %}
+    <p style="color:red"><strong>Error:</strong> {{ error }}</p>
+  {% endif %}
+
+  <h2>{{ "Editar empleado" if valores.id else "Dar de alta un nuevo empleado" }}</h2>
+  <form action="/empleados/guardar" method="post">
+    <input type="hidden" name="empleado_id" value="{{ valores.id }}">
+    <p>
+      <label>Nombre completo:
+        <input type="text" name="nombre_completo" value="{{ valores.nombre_completo }}" required>
+      </label>
+    </p>
+    <p>
+      <label>DNI/NIE:
+        <input type="text" name="dni_nie" value="{{ valores.dni_nie }}" required>
+      </label>
+    </p>
+    <p>
+      <label>Email:
+        <input type="email" name="email" value="{{ valores.email }}" required>
+      </label>
+    </p>
+    <button type="submit">{{ "Guardar cambios" if valores.id else "Dar de alta" }}</button>
+    {% if valores.id %}
+      <a href="/empleados">Cancelar edición</a>
+    {% endif %}
+  </form>
+
+  <hr>
+
+  <h2>Listado de empleados</h2>
+  <p>
+    {% if mostrar_baja %}
+      <a href="/empleados">Mostrar solo activos</a>
+    {% else %}
+      <a href="/empleados?mostrar_baja=1">Mostrar también los de baja</a>
+    {% endif %}
+  </p>
+
+  <table border="1" cellpadding="6" cellspacing="0">
+    <tr>
+      <th>Nombre</th>
+      <th>DNI/NIE</th>
+      <th>Email</th>
+      <th>Estado</th>
+      <th>Fecha alta</th>
+      <th>Fecha baja</th>
+      <th>Acciones</th>
+    </tr>
+    {% for e in empleados %}
+      <tr style="background-color: {{ '#f8d7da' if not e.activo else 'inherit' }}">
+        <td>{{ e.nombre_completo }}</td>
+        <td>{{ e.dni_nie }}</td>
+        <td>{{ e.email }}</td>
+        <td>{{ "Activo" if e.activo else "Baja" }}</td>
+        <td>{{ e.fecha_alta }}</td>
+        <td>{{ e.fecha_baja or "—" }}</td>
+        <td>
+          <a href="/empleados?editar_id={{ e.id }}{% if mostrar_baja %}&mostrar_baja=1{% endif %}">Editar</a>
+          {% if e.activo %}
+            <form action="/empleados/{{ e.id }}/baja" method="post" style="display:inline">
+              <button type="submit" onclick="return confirm('¿Dar de baja a {{ e.nombre_completo }}?')">Dar de baja</button>
+            </form>
+          {% else %}
+            <form action="/empleados/{{ e.id }}/reactivar" method="post" style="display:inline">
+              <button type="submit" onclick="return confirm('¿Reactivar a {{ e.nombre_completo }}?')">Reactivar</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>

@@ -10,6 +10,7 @@ from app.db import (
     init_db,
     listar_empleados,
     obtener_empleado,
+    reactivar_empleado,
     registrar_envio,
 )
 
@@ -58,6 +59,32 @@ def test_dar_baja_no_borra_el_registro(conn):
     empleado = obtener_empleado(conn, empleado_id)
     assert empleado["activo"] == 0
     assert empleado["fecha_baja"] == "2026-06-30"
+
+
+def test_reactivar_empleado_deshace_la_baja(conn):
+    empleado_id = crear_empleado(conn, "Reactivado", "88889999H", "reactivado@example.com", "2025-01-01")
+    dar_baja_empleado(conn, empleado_id, "2026-06-30")
+
+    reactivar_empleado(conn, empleado_id)
+
+    empleado = obtener_empleado(conn, empleado_id)
+    assert empleado["activo"] == 1
+    assert empleado["fecha_baja"] is None
+
+
+def test_reactivar_empleado_no_crea_fila_nueva_ni_cambia_el_dni(conn):
+    empleado_id = crear_empleado(conn, "Reactivado Dos", "77778889I", "reactivado2@example.com", "2025-01-01")
+    dar_baja_empleado(conn, empleado_id, "2026-06-30")
+
+    total_antes = len(listar_empleados(conn))
+    reactivar_empleado(conn, empleado_id)
+    total_despues = len(listar_empleados(conn))
+
+    assert total_despues == total_antes  # ninguna fila nueva
+
+    empleado = obtener_empleado(conn, empleado_id)
+    assert empleado["id"] == empleado_id
+    assert empleado["dni_nie"] == "77778889I"  # el DNI no cambia
 
 
 def test_actualizar_empleado(conn):
