@@ -1,6 +1,7 @@
 import io
 import re
 import sqlite3
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -19,12 +20,22 @@ from app.db import (
     dar_baja_empleado,
     get_connection,
     listar_empleados,
+    listar_empresas,
     obtener_empleado,
+    obtener_empresa,
+    obtener_envio_previo,
     reactivar_empleado,
 )
 from app.mailer_macos import enviar_nomina
 from app.matcher import emparejar_nomina
-from app.pdf_parser import DNI_NIE_PATTERN, ParserError, detectar_nominas, extraer_paginas_bytes, nombre_archivo_seguro
+from app.pdf_parser import (
+    DNI_NIE_PATTERN,
+    ParserError,
+    SinNominasDetectadas,
+    detectar_nominas,
+    extraer_paginas_bytes,
+    nombre_archivo_seguro,
+)
 
 MES_NOMINA_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -33,10 +44,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 ENTRADA_DIR = BASE_DIR / "entrada"
 SALIDA_DIR = BASE_DIR / "salida"
 
-app = FastAPI(title="Nominas MEDIFORM PLUS")
-templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    conn = get_connection()  # asegura el esquema/migraciones al arrancar la app de verdad
+    conn.close()
+    yield
 
-get_connection().close()  # asegura el esquema/migraciones al arrancar la app
+
+app = FastAPI(title="Nominas MEDIFORM PLUS", lifespan=lifespan)
+templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 
 
 @dataclass
@@ -52,6 +68,7 @@ class FilaRevision:
     empleado_nombre: str | None
     empleado_email: str | None
     empleado_dni: str | None
+    envio_previo_fecha: str | None  # fecha del último envío "enviado" a este empleado (en esta empresa) este mes, si lo hubo
     incluir_por_defecto: bool
 
 
@@ -59,6 +76,7 @@ class FilaRevision:
 class LoteRevision:
     ruta_pdf_maestro: str
     mes_nomina: str
+    empresa_id: int
     filas: list[FilaRevision] = field(default_factory=list)
 
 
@@ -68,18 +86,43 @@ estado_actual: LoteRevision | None = None
 @app.get("/")
 def index(request: Request):
     mes_actual = datetime.now().strftime("%Y-%m")
-    return templates.TemplateResponse(request, "subir.html", {"error": None, "mes_nomina_por_defecto": mes_actual})
+    conn = get_connection()
+    try:
+        empresas = listar_empresas(conn, solo_activas=True)
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request,
+        "subir.html",
+        {"error": None, "mes_nomina_por_defecto": mes_actual, "empresas": empresas, "empresa_id_seleccionada": None},
+    )
 
 
 @app.post("/subir")
-def subir_pdf(request: Request, pdf: UploadFile = File(...), mes_nomina: str = Form(...)):
+def subir_pdf(
+    request: Request, pdf: UploadFile = File(...), mes_nomina: str = Form(...), empresa_id: int = Form(...)
+):
     global estado_actual
+
+    conn = get_connection()
+    try:
+        empresas = listar_empresas(conn, solo_activas=True)
+        empresa = obtener_empresa(conn, empresa_id)
+    finally:
+        conn.close()
+
+    contexto_error = {"mes_nomina_por_defecto": mes_nomina, "empresas": empresas, "empresa_id_seleccionada": empresa_id}
+
+    if empresa is None:
+        return templates.TemplateResponse(
+            request, "subir.html", {**contexto_error, "error": "La empresa seleccionada no es válida."}, status_code=400
+        )
 
     if not MES_NOMINA_PATTERN.match(mes_nomina):
         return templates.TemplateResponse(
             request,
             "subir.html",
-            {"error": f"Mes de nómina inválido: '{mes_nomina}' (formato esperado AAAA-MM)", "mes_nomina_por_defecto": mes_nomina},
+            {**contexto_error, "error": f"Mes de nómina inválido: '{mes_nomina}' (formato esperado AAAA-MM)"},
             status_code=400,
         )
 
@@ -89,40 +132,59 @@ def subir_pdf(request: Request, pdf: UploadFile = File(...), mes_nomina: str = F
         f.write(pdf.file.read())
 
     try:
-        nominas = detectar_nominas(str(ruta_maestro))
-    except ParserError as exc:
-        return templates.TemplateResponse(
-            request, "subir.html", {"error": str(exc), "mes_nomina_por_defecto": mes_nomina}, status_code=400
+        nominas = detectar_nominas(str(ruta_maestro), empresa["nif"])
+    except SinNominasDetectadas as exc:
+        mensaje = (
+            f"No se ha detectado ninguna nómina de {empresa['nombre']} en este archivo — "
+            "revisa que sea el PDF correcto de la gestoría."
         )
+        if exc.nif_alternativo:
+            mensaje += (
+                f" (Se ha detectado un NIF distinto: {exc.nif_alternativo} — ¿has seleccionado la empresa correcta?)"
+            )
+        return templates.TemplateResponse(request, "subir.html", {**contexto_error, "error": mensaje}, status_code=400)
+    except ParserError as exc:
+        return templates.TemplateResponse(request, "subir.html", {**contexto_error, "error": str(exc)}, status_code=400)
 
     conn = get_connection()
     try:
         empleados_activos = listar_empleados(conn, solo_activos=True)
+
+        filas = []
+        for i, nomina in enumerate(nominas, start=1):
+            resultado = emparejar_nomina(nomina.nombre_trabajador, nomina.dni_nie, empleados_activos)
+            empleado = resultado.empleado
+            empleado_id = empleado["id"] if empleado is not None else None
+
+            envio_previo_fecha = None
+            if empleado_id is not None:
+                envio_previo = obtener_envio_previo(conn, empleado_id, empresa["id"], mes_nomina)
+                if envio_previo is not None:
+                    envio_previo_fecha = envio_previo["fecha_hora"]
+
+            filas.append(
+                FilaRevision(
+                    numero=i,
+                    nombre_pdf=nomina.nombre_trabajador,
+                    dni_pdf=nomina.dni_nie,
+                    pagina_inicio=nomina.pagina_inicio,
+                    pagina_fin=nomina.pagina_fin,
+                    metodo=resultado.metodo,
+                    score_nombre=resultado.score_nombre,
+                    empleado_id=empleado_id,
+                    empleado_nombre=empleado["nombre_completo"] if empleado is not None else None,
+                    empleado_email=empleado["email"] if empleado is not None else None,
+                    empleado_dni=empleado["dni_nie"] if empleado is not None else None,
+                    envio_previo_fecha=envio_previo_fecha,
+                    incluir_por_defecto=(resultado.metodo == "dni_exacto" and envio_previo_fecha is None),
+                )
+            )
     finally:
         conn.close()
 
-    filas = []
-    for i, nomina in enumerate(nominas, start=1):
-        resultado = emparejar_nomina(nomina.nombre_trabajador, nomina.dni_nie, empleados_activos)
-        empleado = resultado.empleado
-        filas.append(
-            FilaRevision(
-                numero=i,
-                nombre_pdf=nomina.nombre_trabajador,
-                dni_pdf=nomina.dni_nie,
-                pagina_inicio=nomina.pagina_inicio,
-                pagina_fin=nomina.pagina_fin,
-                metodo=resultado.metodo,
-                score_nombre=resultado.score_nombre,
-                empleado_id=empleado["id"] if empleado is not None else None,
-                empleado_nombre=empleado["nombre_completo"] if empleado is not None else None,
-                empleado_email=empleado["email"] if empleado is not None else None,
-                empleado_dni=empleado["dni_nie"] if empleado is not None else None,
-                incluir_por_defecto=(resultado.metodo == "dni_exacto"),
-            )
-        )
-
-    estado_actual = LoteRevision(ruta_pdf_maestro=str(ruta_maestro), mes_nomina=mes_nomina, filas=filas)
+    estado_actual = LoteRevision(
+        ruta_pdf_maestro=str(ruta_maestro), mes_nomina=mes_nomina, empresa_id=empresa["id"], filas=filas
+    )
     return RedirectResponse(url="/revisar", status_code=303)
 
 
@@ -187,6 +249,7 @@ async def confirmar(request: Request):
             resultado = enviar_nomina(
                 conn,
                 fila.empleado_id,
+                estado_actual.empresa_id,
                 fila.empleado_nombre,
                 fila.empleado_email,
                 estado_actual.mes_nomina,

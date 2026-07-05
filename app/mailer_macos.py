@@ -102,6 +102,7 @@ class ResultadoEnvio:
 def enviar_nomina(
     conn: sqlite3.Connection,
     empleado_id: int,
+    empresa_id: int,
     nombre_empleado: str,
     email_empleado: str,
     mes_nomina: str,
@@ -149,6 +150,7 @@ def enviar_nomina(
             fecha_hora,
             mes_nomina,
             empleado_id,
+            empresa_id,
             email_destino,
             estado="error",
             detalle=detalle,
@@ -161,6 +163,7 @@ def enviar_nomina(
         fecha_hora,
         mes_nomina,
         empleado_id,
+        empresa_id,
         destinatario.email_envio,
         estado="enviado",
         email_produccion=destinatario.email_produccion,
@@ -171,6 +174,7 @@ def enviar_nomina(
 @dataclass
 class NominaParaEnviar:
     empleado_id: int
+    empresa_id: int
     nombre_empleado: str
     email_empleado: str
     mes_nomina: str
@@ -203,6 +207,7 @@ def enviar_lote(
         enviar_nomina(
             conn,
             nomina.empleado_id,
+            nomina.empresa_id,
             nomina.nombre_empleado,
             nomina.email_empleado,
             nomina.mes_nomina,

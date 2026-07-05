@@ -108,6 +108,13 @@ def conn():
     conn.close()
 
 
+@pytest.fixture
+def empresa_id(conn):
+    cursor = conn.execute("INSERT INTO empresas (nombre, nif, activa) VALUES (?, ?, 1)", ("Empresa Test", "X00000000"))
+    conn.commit()
+    return cursor.lastrowid
+
+
 def _fake_run_ok(*args, **kwargs):
     return Mock(returncode=0, stderr="")
 
@@ -116,7 +123,7 @@ def _fake_run_error(*args, **kwargs):
     return Mock(returncode=1, stderr="Mail.app no respondió")
 
 
-def test_enviar_nomina_exitoso_registra_estado_enviado(conn, tmp_path, monkeypatch):
+def test_enviar_nomina_exitoso_registra_estado_enviado(conn, empresa_id, tmp_path, monkeypatch):
     empleado_id = crear_empleado(conn, "Nicolás Alcalde Lasaosa", "02349419S", "nicolas@example.com", "2025-01-01")
     ruta_pdf = tmp_path / "01_nicolas.pdf"
     ruta_pdf.write_bytes(b"%PDF-1.7 contenido de prueba")
@@ -125,7 +132,7 @@ def test_enviar_nomina_exitoso_registra_estado_enviado(conn, tmp_path, monkeypat
     config = Configuracion(modo_envio="produccion", email_prueba=None)
 
     resultado = enviar_nomina(
-        conn, empleado_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
+        conn, empleado_id, empresa_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
     )
 
     assert resultado.estado == "enviado"
@@ -135,9 +142,10 @@ def test_enviar_nomina_exitoso_registra_estado_enviado(conn, tmp_path, monkeypat
     assert fila["estado"] == "enviado"
     assert fila["email_destino"] == "nicolas@example.com"
     assert fila["email_produccion"] is None
+    assert fila["empresa_id"] == empresa_id
 
 
-def test_enviar_nomina_en_modo_prueba_registra_email_produccion(conn, tmp_path, monkeypatch):
+def test_enviar_nomina_en_modo_prueba_registra_email_produccion(conn, empresa_id, tmp_path, monkeypatch):
     empleado_id = crear_empleado(conn, "Nicolás Alcalde Lasaosa", "02349419S", "nicolas@example.com", "2025-01-01")
     ruta_pdf = tmp_path / "01_nicolas.pdf"
     ruta_pdf.write_bytes(b"%PDF-1.7 contenido de prueba")
@@ -146,7 +154,7 @@ def test_enviar_nomina_en_modo_prueba_registra_email_produccion(conn, tmp_path, 
     config = Configuracion(modo_envio="prueba", email_prueba="pruebas@example.com")
 
     resultado = enviar_nomina(
-        conn, empleado_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
+        conn, empleado_id, empresa_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
     )
 
     assert resultado.estado == "enviado"
@@ -157,7 +165,7 @@ def test_enviar_nomina_en_modo_prueba_registra_email_produccion(conn, tmp_path, 
     assert fila["email_produccion"] == "nicolas@example.com"
 
 
-def test_enviar_nomina_falla_si_falta_el_adjunto_y_no_llama_a_osascript(conn, tmp_path, monkeypatch):
+def test_enviar_nomina_falla_si_falta_el_adjunto_y_no_llama_a_osascript(conn, empresa_id, tmp_path, monkeypatch):
     empleado_id = crear_empleado(conn, "Nicolás Alcalde Lasaosa", "02349419S", "nicolas@example.com", "2025-01-01")
     ruta_pdf_inexistente = tmp_path / "no_existe.pdf"
 
@@ -168,6 +176,7 @@ def test_enviar_nomina_falla_si_falta_el_adjunto_y_no_llama_a_osascript(conn, tm
     resultado = enviar_nomina(
         conn,
         empleado_id,
+        empresa_id,
         "Nicolás Alcalde Lasaosa",
         "nicolas@example.com",
         "2026-06",
@@ -183,7 +192,7 @@ def test_enviar_nomina_falla_si_falta_el_adjunto_y_no_llama_a_osascript(conn, tm
     assert fila["estado"] == "error"
 
 
-def test_enviar_nomina_falla_si_osascript_devuelve_error(conn, tmp_path, monkeypatch):
+def test_enviar_nomina_falla_si_osascript_devuelve_error(conn, empresa_id, tmp_path, monkeypatch):
     empleado_id = crear_empleado(conn, "Nicolás Alcalde Lasaosa", "02349419S", "nicolas@example.com", "2025-01-01")
     ruta_pdf = tmp_path / "01_nicolas.pdf"
     ruta_pdf.write_bytes(b"%PDF-1.7 contenido de prueba")
@@ -192,7 +201,7 @@ def test_enviar_nomina_falla_si_osascript_devuelve_error(conn, tmp_path, monkeyp
     config = Configuracion(modo_envio="produccion", email_prueba=None)
 
     resultado = enviar_nomina(
-        conn, empleado_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
+        conn, empleado_id, empresa_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
     )
 
     assert resultado.estado == "error"
@@ -203,7 +212,7 @@ def test_enviar_nomina_falla_si_osascript_devuelve_error(conn, tmp_path, monkeyp
     assert "Mail.app no respondió" in fila["detalle"]
 
 
-def test_enviar_lote_continua_tras_un_fallo_individual(conn, tmp_path, monkeypatch):
+def test_enviar_lote_continua_tras_un_fallo_individual(conn, empresa_id, tmp_path, monkeypatch):
     empleado_ok_id = crear_empleado(conn, "Empleado Ok", "11111111A", "ok@example.com", "2025-01-01")
     empleado_falla_id = crear_empleado(conn, "Empleado Falla", "22222222B", "falla@example.com", "2025-01-01")
 
@@ -215,8 +224,10 @@ def test_enviar_lote_continua_tras_un_fallo_individual(conn, tmp_path, monkeypat
     config = Configuracion(modo_envio="produccion", email_prueba=None)
 
     nominas = [
-        NominaParaEnviar(empleado_falla_id, "Empleado Falla", "falla@example.com", "2026-06", str(ruta_pdf_inexistente)),
-        NominaParaEnviar(empleado_ok_id, "Empleado Ok", "ok@example.com", "2026-06", str(ruta_pdf_ok)),
+        NominaParaEnviar(
+            empleado_falla_id, empresa_id, "Empleado Falla", "falla@example.com", "2026-06", str(ruta_pdf_inexistente)
+        ),
+        NominaParaEnviar(empleado_ok_id, empresa_id, "Empleado Ok", "ok@example.com", "2026-06", str(ruta_pdf_ok)),
     ]
 
     resumen = enviar_lote(conn, nominas, config)

@@ -4,7 +4,8 @@ import re
 import pytest
 from pypdf import PdfReader
 
-from app.pdf_parser import detectar_nominas, separar_pdf
+from app.db import NIF_MEDIFORM_PLUS
+from app.pdf_parser import SinNominasDetectadas, detectar_nominas, separar_pdf
 
 DNI_NIE_PATTERN = re.compile(r"^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$")
 
@@ -17,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_detectar_nominas_cubre_todas_las_paginas_sin_solapes():
-    nominas = detectar_nominas(PDF_EJEMPLO)
+    nominas = detectar_nominas(PDF_EJEMPLO, NIF_MEDIFORM_PLUS)
 
     assert len(nominas) == 29
     for anterior, actual in zip(nominas, nominas[1:]):
@@ -28,7 +29,7 @@ def test_detectar_nominas_cubre_todas_las_paginas_sin_solapes():
 
 
 def test_detectar_nominas_extrae_dni_con_formato_valido_en_todas():
-    nominas = detectar_nominas(PDF_EJEMPLO)
+    nominas = detectar_nominas(PDF_EJEMPLO, NIF_MEDIFORM_PLUS)
 
     for nomina in nominas:
         assert nomina.dni_nie is not None
@@ -40,8 +41,16 @@ def test_detectar_nominas_extrae_dni_con_formato_valido_en_todas():
 
 
 def test_separar_pdf_genera_un_pdf_de_una_pagina_por_nomina(tmp_path):
-    rutas = separar_pdf(PDF_EJEMPLO, str(tmp_path))
+    rutas = separar_pdf(PDF_EJEMPLO, str(tmp_path), NIF_MEDIFORM_PLUS)
 
     assert len(rutas) == 29
     for ruta in rutas:
         assert len(PdfReader(ruta).pages) == 1
+
+
+def test_detectar_nominas_con_nif_equivocado_informa_del_nif_real_detectado():
+    with pytest.raises(SinNominasDetectadas) as excinfo:
+        detectar_nominas(PDF_EJEMPLO, "Z99999999")
+
+    assert excinfo.value.nif_esperado == "Z99999999"
+    assert excinfo.value.nif_alternativo == NIF_MEDIFORM_PLUS

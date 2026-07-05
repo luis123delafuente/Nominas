@@ -15,6 +15,14 @@
 
   <form action="/subir" method="post" enctype="multipart/form-data">
     <p>
+      <label for="empresa_id">Empresa:</label>
+      <select id="empresa_id" name="empresa_id" required>
+        {% for empresa in empresas %}
+          <option value="{{ empresa.id }}" {% if empresa.id == empresa_id_seleccionada %}selected{% endif %}>{{ empresa.nombre }}</option>
+        {% endfor %}
+      </select>
+    </p>
+    <p>
       <input type="file" id="pdf" name="pdf" accept="application/pdf" required>
     </p>
     <p>

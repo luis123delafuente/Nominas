@@ -15,8 +15,8 @@ def client(tmp_path, monkeypatch):
     init_db(conn)
     conn.close()
 
-    with TestClient(main_module.app) as client:
-        yield client
+    with TestClient(main_module.app) as test_client:
+        yield test_client
 
 
 def _buscar_empleado_por_dni(dni_nie: str):

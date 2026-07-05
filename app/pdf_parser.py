@@ -6,8 +6,12 @@ from dataclasses import dataclass
 import fitz
 from pypdf import PdfReader, PdfWriter
 
-NIF_EMPRESA_PATTERN = re.compile(r"NIF\.\s*B82827635")
 CIERRE_PATTERN = re.compile(r"Cotización adicional de solidaridad", re.IGNORECASE)
+
+# Patrón genérico para detectar CUALQUIER NIF/CIF con formato reconocible en el PDF,
+# aunque no sea el esperado — se usa solo para dar una pista útil en el mensaje de error
+# ("parece que has subido el PDF de otra empresa").
+NIF_GENERICO_PATTERN = re.compile(r"NIF\.\s*([A-Z0-9]{8,9})")
 
 TRABAJADOR_HEADER = "TRABAJADOR/A"
 CATEGORIA_HEADER = "CATEGORIA"
@@ -19,6 +23,23 @@ DNI_NIE_PATTERN = re.compile(r"^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$")
 
 class ParserError(Exception):
     """Anclajes esperados no encontrados: requiere revisión manual."""
+
+
+class SinNominasDetectadas(ParserError):
+    """No se encontró ningún anclaje de nómina para el NIF esperado.
+
+    Puede ser un PDF incorrecto, o el PDF correcto de OTRA empresa: si se detecta algún
+    otro NIF reconocible en el archivo, se guarda en `nif_alternativo` para poder avisar
+    de que quizás se ha seleccionado la empresa equivocada.
+    """
+
+    def __init__(self, nif_esperado: str, nif_alternativo: str | None = None):
+        self.nif_esperado = nif_esperado
+        self.nif_alternativo = nif_alternativo
+        mensaje = f"No se encontró ningún anclaje 'NIF. {nif_esperado}'"
+        if nif_alternativo:
+            mensaje += f" (se detectó otro NIF distinto: {nif_alternativo})"
+        super().__init__(mensaje)
 
 
 @dataclass
@@ -82,12 +103,26 @@ def _extraer_dni_trabajador(page: fitz.Page) -> str | None:
     return dni_candidato if DNI_NIE_PATTERN.match(dni_candidato) else None
 
 
-def detectar_nominas(ruta_pdf: str) -> list[NominaDetectada]:
-    doc = fitz.open(ruta_pdf)
+def _buscar_nif_alternativo(doc: fitz.Document) -> str | None:
+    for page in doc:
+        coincidencia = NIF_GENERICO_PATTERN.search(page.get_text())
+        if coincidencia:
+            return coincidencia.group(1)
+    return None
 
-    inicios = [i for i, page in enumerate(doc) if NIF_EMPRESA_PATTERN.search(page.get_text())]
+
+def detectar_nominas(ruta_pdf: str, nif_esperado: str) -> list[NominaDetectada]:
+    """Detecta las nóminas de un PDF cuyo anclaje de empresa es 'NIF. <nif_esperado>'.
+
+    `nif_esperado` viene de la empresa seleccionada al subir el PDF (app/main.py) — cada
+    empresa del cliente tiene el suyo, nunca está fijo dentro del parser.
+    """
+    doc = fitz.open(ruta_pdf)
+    patron_nif_esperado = re.compile(rf"NIF\.\s*{re.escape(nif_esperado)}")
+
+    inicios = [i for i, page in enumerate(doc) if patron_nif_esperado.search(page.get_text())]
     if not inicios:
-        raise ParserError(f"No se encontró ningún anclaje 'NIF. B82827635' en {ruta_pdf}")
+        raise SinNominasDetectadas(nif_esperado, _buscar_nif_alternativo(doc))
 
     nominas = []
     for idx, inicio in enumerate(inicios):
@@ -128,8 +163,8 @@ def extraer_paginas_bytes(reader: PdfReader, pagina_inicio: int, pagina_fin: int
     return buffer.getvalue()
 
 
-def separar_pdf(ruta_pdf: str, carpeta_salida: str) -> list[str]:
-    nominas = detectar_nominas(ruta_pdf)
+def separar_pdf(ruta_pdf: str, carpeta_salida: str, nif_esperado: str) -> list[str]:
+    nominas = detectar_nominas(ruta_pdf, nif_esperado)
     reader = PdfReader(ruta_pdf)
 
     os.makedirs(carpeta_salida, exist_ok=True)

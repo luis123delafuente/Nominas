@@ -44,6 +44,7 @@
         <th>Empleado emparejado</th>
         <th>Email</th>
         <th>Estado del match</th>
+        <th>Envíos previos</th>
         <th>Score nombre</th>
         <th>Vista previa</th>
         <th>Incluir en envío</th>
@@ -74,6 +75,13 @@
               🔎 Coincidencia por nombre (sin DNI en la nómina) — revisar a mano
             {% else %}
               ❌ Sin match — hay que dar de alta al empleado o corregir su ficha
+            {% endif %}
+          </td>
+          <td style="{{ 'background-color:#cfe2ff' if fila.envio_previo_fecha else '' }}">
+            {% if fila.envio_previo_fecha %}
+              📨 Ya se envió el {{ fila.envio_previo_fecha }} — revisa antes de reenviar
+            {% else %}
+              —
             {% endif %}
           </td>
           <td>{{ "%.1f"|format(fila.score_nombre) }}</td>
