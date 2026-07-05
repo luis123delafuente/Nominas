@@ -51,6 +51,11 @@
     {% endif %}
   </p>
 
+  <p>
+    <label for="buscador_nombre">Buscar por nombre:</label>
+    <input type="text" id="buscador_nombre" oninput="filtrarEmpleadosPorNombre()">
+  </p>
+
   <table border="1" cellpadding="6" cellspacing="0">
     <tr>
       <th>Nombre</th>
@@ -62,7 +67,7 @@
       <th>Acciones</th>
     </tr>
     {% for e in empleados %}
-      <tr style="background-color: {{ '#f8d7da' if not e.activo else 'inherit' }}">
+      <tr style="background-color: {{ '#f8d7da' if not e.activo else 'inherit' }}" data-nombre="{{ e.nombre_completo }}">
         <td>{{ e.nombre_completo }}</td>
         <td>{{ e.dni_nie }}</td>
         <td>{{ e.email }}</td>
@@ -84,5 +89,30 @@
       </tr>
     {% endfor %}
   </table>
+  <p id="mensaje_sin_resultados" style="display:none">No se encontraron empleados con ese nombre.</p>
+
+  <script>
+    // Normaliza quitando tildes/diacríticos para que "canas" encuentre "CAÑAS".
+    function normalizarNombre(texto) {
+      return texto
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+    }
+
+    function filtrarEmpleadosPorNombre() {
+      var texto = normalizarNombre(document.getElementById("buscador_nombre").value.trim());
+      var filas = document.querySelectorAll("table tr[data-nombre]");
+      var visibles = 0;
+
+      filas.forEach(function (fila) {
+        var coincide = normalizarNombre(fila.dataset.nombre).indexOf(texto) !== -1;
+        fila.style.display = coincide ? "" : "none";
+        if (coincide) visibles++;
+      });
+
+      document.getElementById("mensaje_sin_resultados").style.display = visibles === 0 ? "" : "none";
+    }
+  </script>
 </body>
 </html>
