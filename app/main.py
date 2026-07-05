@@ -2,7 +2,7 @@ import io
 import re
 import sqlite3
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -33,6 +33,7 @@ from app.pdf_parser import (
     ParserError,
     SinNominasDetectadas,
     detectar_nominas,
+    extraer_mes_nomina,
     extraer_paginas_bytes,
     nombre_archivo_seguro,
 )
@@ -85,23 +86,18 @@ estado_actual: LoteRevision | None = None
 
 @app.get("/")
 def index(request: Request):
-    mes_actual = datetime.now().strftime("%Y-%m")
     conn = get_connection()
     try:
         empresas = listar_empresas(conn, solo_activas=True)
     finally:
         conn.close()
     return templates.TemplateResponse(
-        request,
-        "subir.html",
-        {"error": None, "mes_nomina_por_defecto": mes_actual, "empresas": empresas, "empresa_id_seleccionada": None},
+        request, "subir.html", {"error": None, "empresas": empresas, "empresa_id_seleccionada": None}
     )
 
 
 @app.post("/subir")
-def subir_pdf(
-    request: Request, pdf: UploadFile = File(...), mes_nomina: str = Form(...), empresa_id: int = Form(...)
-):
+def subir_pdf(request: Request, pdf: UploadFile = File(...), empresa_id: int = Form(...)):
     global estado_actual
 
     conn = get_connection()
@@ -111,19 +107,11 @@ def subir_pdf(
     finally:
         conn.close()
 
-    contexto_error = {"mes_nomina_por_defecto": mes_nomina, "empresas": empresas, "empresa_id_seleccionada": empresa_id}
+    contexto_error = {"empresas": empresas, "empresa_id_seleccionada": empresa_id}
 
     if empresa is None:
         return templates.TemplateResponse(
             request, "subir.html", {**contexto_error, "error": "La empresa seleccionada no es válida."}, status_code=400
-        )
-
-    if not MES_NOMINA_PATTERN.match(mes_nomina):
-        return templates.TemplateResponse(
-            request,
-            "subir.html",
-            {**contexto_error, "error": f"Mes de nómina inválido: '{mes_nomina}' (formato esperado AAAA-MM)"},
-            status_code=400,
         )
 
     ENTRADA_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,6 +133,11 @@ def subir_pdf(
         return templates.TemplateResponse(request, "subir.html", {**contexto_error, "error": mensaje}, status_code=400)
     except ParserError as exc:
         return templates.TemplateResponse(request, "subir.html", {**contexto_error, "error": str(exc)}, status_code=400)
+
+    # El mes es una sugerencia, no un dato crítico: si no se puede leer del PDF
+    # (formato inesperado en ese bloque concreto), caemos al mes actual del sistema
+    # y el usuario lo corrige a mano en la propia pantalla de revisión.
+    mes_nomina = extraer_mes_nomina(str(ruta_maestro), nominas[0].pagina_inicio) or datetime.now().strftime("%Y-%m")
 
     conn = get_connection()
     try:
@@ -205,6 +198,41 @@ def revisar(request: Request):
     )
 
 
+@app.post("/revisar/mes_nomina")
+def revisar_actualizar_mes(mes_nomina: str = Form(...)):
+    """Corrige el mes sugerido (extraído del PDF) y recalcula los avisos de 'ya enviado'
+    de toda la tabla — que dependen de (empresa_id, mes_nomina) juntos, nunca del mes solo."""
+    global estado_actual
+    if estado_actual is None:
+        return RedirectResponse(url="/")
+
+    if not MES_NOMINA_PATTERN.match(mes_nomina):
+        return RedirectResponse(url="/revisar", status_code=303)
+
+    conn = get_connection()
+    try:
+        nuevas_filas = []
+        for fila in estado_actual.filas:
+            envio_previo_fecha = None
+            if fila.empleado_id is not None:
+                envio_previo = obtener_envio_previo(conn, fila.empleado_id, estado_actual.empresa_id, mes_nomina)
+                if envio_previo is not None:
+                    envio_previo_fecha = envio_previo["fecha_hora"]
+
+            nuevas_filas.append(
+                replace(
+                    fila,
+                    envio_previo_fecha=envio_previo_fecha,
+                    incluir_por_defecto=(fila.metodo == "dni_exacto" and envio_previo_fecha is None),
+                )
+            )
+    finally:
+        conn.close()
+
+    estado_actual = replace(estado_actual, mes_nomina=mes_nomina, filas=nuevas_filas)
+    return RedirectResponse(url="/revisar", status_code=303)
+
+
 @app.get("/revisar/preview/{numero}")
 def preview(numero: int):
     if estado_actual is None:
@@ -227,12 +255,15 @@ async def confirmar(request: Request):
     form = await request.form()
     numeros_incluidos = {int(v) for v in form.getlist("incluir")}
 
-    SALIDA_DIR.mkdir(parents=True, exist_ok=True)
     reader = PdfReader(estado_actual.ruta_pdf_maestro)
     config = cargar_configuracion()
 
     conn = get_connection()
     try:
+        empresa = obtener_empresa(conn, estado_actual.empresa_id)
+        carpeta_salida = SALIDA_DIR / empresa["nif"] / estado_actual.mes_nomina
+        carpeta_salida.mkdir(parents=True, exist_ok=True)
+
         resultados = []
         for fila in estado_actual.filas:
             if fila.metodo == "sin_match":
@@ -242,7 +273,7 @@ async def confirmar(request: Request):
 
             password = fila.dni_pdf if fila.metodo in ("dni_exacto", "dni_con_alerta_nombre") else fila.empleado_dni
             nombre_archivo = f"{fila.numero:02d}_{nombre_archivo_seguro(fila.empleado_nombre)}.pdf"
-            ruta_salida = SALIDA_DIR / nombre_archivo
+            ruta_salida = carpeta_salida / nombre_archivo
 
             cifrar_paginas(reader, range(fila.pagina_inicio, fila.pagina_fin + 1), str(ruta_salida), password)
 

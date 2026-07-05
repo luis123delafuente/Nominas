@@ -17,8 +17,16 @@ TRABAJADOR_HEADER = "TRABAJADOR/A"
 CATEGORIA_HEADER = "CATEGORIA"
 ANTIGUEDAD_HEADER = "ANTIGUEDAD"
 DNI_HEADER = "D.N.I."
+PERIODO_HEADER = "PERIODO"
 
 DNI_NIE_PATTERN = re.compile(r"^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$")
+
+# Ej.: "MENS 01 JUN 26 a 30 JUN 26" -> captura mes abreviado y año de 2 dígitos del inicio.
+PERIODO_PATTERN = re.compile(r"\bMENS\s+\d{1,2}\s+([A-Z]{3})\s+(\d{2})\b")
+MES_ABREVIADO_A_NUMERO = {
+    "ENE": 1, "FEB": 2, "MAR": 3, "ABR": 4, "MAY": 5, "JUN": 6,
+    "JUL": 7, "AGO": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DIC": 12,
+}
 
 
 class ParserError(Exception):
@@ -101,6 +109,54 @@ def _extraer_dni_trabajador(page: fitz.Page) -> str | None:
     dni_candidato = dni_candidato.replace(" ", "").upper()
 
     return dni_candidato if DNI_NIE_PATTERN.match(dni_candidato) else None
+
+
+def _extraer_mes_nomina(page: fitz.Page) -> str | None:
+    """Extrae 'AAAA-MM' del campo PERIODO (ej. 'MENS 01 JUN 26 a 30 JUN 26'), anclando en
+    la cabecera PERIODO — no es una búsqueda de texto libre por toda la página.
+
+    Devuelve None si el anclaje o el patrón esperado no aparecen en esta página en
+    concreto: es una ayuda para sugerir un valor por defecto, no un dato crítico como el
+    NIF o el DNI, así que quien llame debe estar preparado para recibir None y usar su
+    propio valor por defecto.
+    """
+    words = page.get_text("words")
+
+    periodo_x = next((x0 for x0, y0, x1, y1, w, *_ in words if w == PERIODO_HEADER), None)
+    if periodo_x is None:
+        return None
+
+    header_y = min(y0 for x0, y0, x1, y1, w, *_ in words if w == PERIODO_HEADER)
+    fila = _fila_bajo_cabecera(words, header_y, x_min=0, x_max=float("inf"))
+
+    coincidencia = PERIODO_PATTERN.search(fila)
+    if not coincidencia:
+        return None
+
+    mes_abreviado, anio_dos_digitos = coincidencia.groups()
+    numero_mes = MES_ABREVIADO_A_NUMERO.get(mes_abreviado.upper())
+    if numero_mes is None:
+        return None
+
+    # Asunción deliberada: el año de dos dígitos siempre es "20XX". Razonable en 2026 —
+    # si este código sigue vivo en 2100, que quien lo lea se ría un poco de nosotros.
+    anio_completo = 2000 + int(anio_dos_digitos)
+
+    return f"{anio_completo:04d}-{numero_mes:02d}"
+
+
+def extraer_mes_nomina(ruta_pdf: str, pagina: int) -> str | None:
+    """Sugerencia de 'AAAA-MM' a partir del campo PERIODO de una página concreta del PDF
+    (normalmente la primera nómina detectada, vía NominaDetectada.pagina_inicio).
+
+    Devuelve None si no se puede determinar con confianza. Es una ayuda para precargar
+    el formulario, nunca un dato crítico: el llamador debe caer a su propio valor por
+    defecto si recibe None, sin fallar el resto de la subida por esto.
+    """
+    doc = fitz.open(ruta_pdf)
+    if pagina < 0 or pagina >= len(doc):
+        return None
+    return _extraer_mes_nomina(doc[pagina])
 
 
 def _buscar_nif_alternativo(doc: fitz.Document) -> str | None:

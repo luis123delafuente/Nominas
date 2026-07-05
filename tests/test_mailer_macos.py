@@ -212,6 +212,71 @@ def test_enviar_nomina_falla_si_osascript_devuelve_error(conn, empresa_id, tmp_p
     assert "Mail.app no respondió" in fila["detalle"]
 
 
+def test_asunto_y_cuerpo_mencionan_la_empresa_y_distinguen_entre_empresas_distintas(conn, tmp_path, monkeypatch):
+    empresa_a_id = conn.execute(
+        "INSERT INTO empresas (nombre, nif, activa) VALUES (?, ?, 1)", ("MEDIFORM PLUS S.L.", "B82827635")
+    ).lastrowid
+    empresa_b_id = conn.execute(
+        "INSERT INTO empresas (nombre, nif, activa) VALUES (?, ?, 1)", ("NUESTRAFARMA PLUS SL", "B27523299")
+    ).lastrowid
+    conn.commit()
+
+    empleado_id = crear_empleado(conn, "Nicolás Alcalde Lasaosa", "02349419S", "nicolas@example.com", "2025-01-01")
+
+    ruta_pdf_a = tmp_path / "a.pdf"
+    ruta_pdf_b = tmp_path / "b.pdf"
+    ruta_pdf_a.write_bytes(b"%PDF-1.7 contenido")
+    ruta_pdf_b.write_bytes(b"%PDF-1.7 contenido")
+
+    scripts_capturados = []
+
+    def _fake_run_captura(cmd, **kwargs):
+        scripts_capturados.append(cmd[2])  # ["osascript", "-e", script]
+        return Mock(returncode=0, stderr="")
+
+    monkeypatch.setattr("app.mailer_macos.subprocess.run", _fake_run_captura)
+    config = Configuracion(modo_envio="produccion", email_prueba=None)
+
+    resultado_a = enviar_nomina(
+        conn, empleado_id, empresa_a_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf_a), config
+    )
+    resultado_b = enviar_nomina(
+        conn, empleado_id, empresa_b_id, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf_b), config
+    )
+
+    assert resultado_a.estado == "enviado"
+    assert resultado_b.estado == "enviado"
+    assert len(scripts_capturados) == 2
+    script_a, script_b = scripts_capturados
+
+    # El asunto/cuerpo de la empresa A menciona su nombre y no el de la B, y viceversa.
+    assert "MEDIFORM PLUS S.L." in script_a
+    assert "NUESTRAFARMA PLUS SL" not in script_a
+
+    assert "NUESTRAFARMA PLUS SL" in script_b
+    assert "MEDIFORM PLUS S.L." not in script_b
+
+    assert script_a != script_b
+
+
+def test_enviar_nomina_falla_si_la_empresa_no_existe(conn, tmp_path, monkeypatch):
+    empleado_id = crear_empleado(conn, "Nicolás Alcalde Lasaosa", "02349419S", "nicolas@example.com", "2025-01-01")
+    ruta_pdf = tmp_path / "01_nicolas.pdf"
+    ruta_pdf.write_bytes(b"%PDF-1.7 contenido de prueba")
+
+    llamadas = []
+    monkeypatch.setattr("app.mailer_macos.subprocess.run", lambda *a, **k: llamadas.append(1))
+    config = Configuracion(modo_envio="produccion", email_prueba=None)
+
+    resultado = enviar_nomina(
+        conn, empleado_id, 99999, "Nicolás Alcalde Lasaosa", "nicolas@example.com", "2026-06", str(ruta_pdf), config
+    )
+
+    assert resultado.estado == "error"
+    assert "99999" in resultado.detalle
+    assert llamadas == []  # nunca se llegó a invocar osascript sin saber el nombre de la empresa
+
+
 def test_enviar_lote_continua_tras_un_fallo_individual(conn, empresa_id, tmp_path, monkeypatch):
     empleado_ok_id = crear_empleado(conn, "Empleado Ok", "11111111A", "ok@example.com", "2025-01-01")
     empleado_falla_id = crear_empleado(conn, "Empleado Falla", "22222222B", "falla@example.com", "2025-01-01")

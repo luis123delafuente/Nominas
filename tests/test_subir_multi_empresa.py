@@ -33,12 +33,14 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
 
-def _subir_pdf_de_ejemplo(test_client, empresa_id, mes_nomina="2026-06"):
+def _subir_pdf_de_ejemplo(test_client, empresa_id):
+    # El mes ya no se envía en el formulario: se extrae del contenido del PDF
+    # (campo PERIODO de la primera nómina). El PDF de ejemplo es de "2026-06".
     with open(PDF_EJEMPLO, "rb") as f:
         return test_client.post(
             "/subir",
             files={"pdf": ("NOMINAS_062026.pdf", f, "application/pdf")},
-            data={"mes_nomina": mes_nomina, "empresa_id": empresa_id},
+            data={"empresa_id": empresa_id},
             follow_redirects=True,
         )
 
@@ -60,6 +62,8 @@ def test_subir_seleccionando_la_empresa_correcta_funciona_como_siempre(client):
     assert "Revisión de nóminas detectadas" in respuesta.text
     assert "ALCALDE LASAOSA, NICOLAS" in respuesta.text
     assert "DNI exacto" in respuesta.text
+    # El mes se ha extraído solo del contenido del PDF (campo PERIODO), sin teclearlo.
+    assert "2026-06" in respuesta.text
 
 
 def test_subir_con_empresa_equivocada_falla_y_menciona_el_nif_real(client):

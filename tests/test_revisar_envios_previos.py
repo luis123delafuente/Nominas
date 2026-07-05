@@ -41,12 +41,14 @@ def client(tmp_path, monkeypatch):
         yield test_client, empleado_id, empresa_id
 
 
-def _subir_pdf_de_ejemplo(test_client, empresa_id, mes_nomina="2026-06"):
+def _subir_pdf_de_ejemplo(test_client, empresa_id):
+    # El mes ya no se envía en el formulario: se extrae del contenido del PDF
+    # (campo PERIODO de la primera nómina). El PDF de ejemplo es de "2026-06".
     with open(PDF_EJEMPLO, "rb") as f:
         return test_client.post(
             "/subir",
             files={"pdf": ("NOMINAS_062026.pdf", f, "application/pdf")},
-            data={"mes_nomina": mes_nomina, "empresa_id": empresa_id},
+            data={"empresa_id": empresa_id},
             follow_redirects=True,
         )
 
@@ -99,3 +101,36 @@ def test_con_envio_previo_muestra_aviso_y_desmarca_el_checkbox(client):
 
     # ...pero sigue disponible para marcarla y reenviar a propósito (no está deshabilitada).
     assert "disabled" not in checkbox
+
+
+def test_corregir_mes_en_revisar_recalcula_aviso_ya_enviado(client):
+    test_client, empleado_id, empresa_id = client
+
+    # Envío previo registrado en "2026-05" (mes distinto al detectado del PDF, "2026-06").
+    conn = main_module.get_connection()
+    try:
+        registrar_envio(
+            conn,
+            fecha_hora="2026-06-01T10:00:00",
+            mes_nomina="2026-05",
+            empleado_id=empleado_id,
+            empresa_id=empresa_id,
+            email_destino="nicolas@example.com",
+            estado="enviado",
+        )
+    finally:
+        conn.close()
+
+    respuesta = _subir_pdf_de_ejemplo(test_client, empresa_id)
+    assert respuesta.status_code == 200
+    # El mes detectado (2026-06) no coincide con el del envío previo (2026-05): sin aviso.
+    assert "Ya se envió" not in respuesta.text
+
+    # Al corregir el mes a "2026-05" en la pantalla de revisión, debe recalcularse el aviso.
+    respuesta_corregida = test_client.post(
+        "/revisar/mes_nomina", data={"mes_nomina": "2026-05"}, follow_redirects=True
+    )
+    assert respuesta_corregida.status_code == 200
+    assert "Ya se envió el 2026-06-01T10:00:00" in respuesta_corregida.text
+    checkbox = _checkbox_de_la_fila(respuesta_corregida.text, 1)
+    assert "checked" not in checkbox

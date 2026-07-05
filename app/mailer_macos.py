@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config import Configuracion, cargar_configuracion
-from app.db import registrar_envio
+from app.db import obtener_empresa, registrar_envio
 
 TIMEOUT_OSASCRIPT_SEGUNDOS = 30
 
@@ -128,13 +128,22 @@ def enviar_nomina(
         if not ruta_adjunto.exists():
             raise EnvioError(f"El PDF cifrado no existe en la ruta esperada: {ruta_pdf_cifrado}")
 
+        empresa = obtener_empresa(conn, empresa_id)
+        if empresa is None:
+            raise EnvioError(f"No existe ninguna empresa con id={empresa_id}")
+        nombre_empresa = empresa["nombre"]
+
         nota = nota_modo_prueba(destinatario)
 
-        asunto = f"Nómina {mes_nomina}"
+        asunto = f"Nómina {nombre_empresa} - {mes_nomina}"
         if nota:
             asunto = f"{nota} — {asunto}"
 
-        cuerpo = f"Hola {nombre_empleado},\n\nAdjuntamos tu nómina correspondiente a {mes_nomina}.\n\nUn saludo."
+        cuerpo = (
+            f"Hola {nombre_empleado},\n\n"
+            f"Adjuntamos tu nómina de {nombre_empresa} correspondiente a {mes_nomina}.\n\n"
+            "Un saludo."
+        )
         if nota:
             cuerpo = f"{nota}\n\n{cuerpo}"
 
@@ -145,17 +154,23 @@ def enviar_nomina(
         detalle = str(exc) or type(exc).__name__
         email_destino = destinatario.email_envio if destinatario else ""
         email_produccion = destinatario.email_produccion if destinatario else None
-        registrar_envio(
-            conn,
-            fecha_hora,
-            mes_nomina,
-            empleado_id,
-            empresa_id,
-            email_destino,
-            estado="error",
-            detalle=detalle,
-            email_produccion=email_produccion,
-        )
+        try:
+            registrar_envio(
+                conn,
+                fecha_hora,
+                mes_nomina,
+                empleado_id,
+                empresa_id,
+                email_destino,
+                estado="error",
+                detalle=detalle,
+                email_produccion=email_produccion,
+            )
+        except Exception:
+            # Si ni siquiera se puede registrar el error (p.ej. empresa_id o empleado_id
+            # inválidos, que violan la FK de envios_log), no dejamos que esto aborte el
+            # resto del lote: se pierde ese registro en el histórico, pero no el resto de envíos.
+            pass
         return ResultadoEnvio(empleado_id, "error", email_destino, email_produccion, detalle)
 
     registrar_envio(

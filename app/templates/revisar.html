@@ -7,6 +7,13 @@
 <body>
   <h1>Revisión de nóminas detectadas — nómina de {{ mes_nomina }}</h1>
 
+  <form action="/revisar/mes_nomina" method="post">
+    <label for="mes_nomina_input">Mes de la nómina (AAAA-MM):</label>
+    <input type="text" id="mes_nomina_input" name="mes_nomina" pattern="\d{4}-\d{2}" value="{{ mes_nomina }}" required>
+    <button type="submit">Actualizar</button>
+    <small>Detectado del propio PDF — corrígelo aquí si no es correcto (recalcula los avisos de "ya enviado").</small>
+  </form>
+
   <p>
     <strong>Modo de envío: {{ "PRUEBA" if modo_envio == "prueba" else "PRODUCCIÓN" }}</strong>
     {% if modo_envio == "prueba" %}
