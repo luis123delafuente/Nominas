@@ -6,7 +6,13 @@ import pytest
 from pypdf import PdfReader
 
 from app.db import NIF_MEDIFORM_PLUS
-from app.pdf_parser import SinNominasDetectadas, detectar_nominas, extraer_mes_nomina, separar_pdf
+from app.pdf_parser import (
+    SinNominasDetectadas,
+    _extraer_liquido_a_percibir,
+    detectar_nominas,
+    extraer_mes_nomina,
+    separar_pdf,
+)
 
 DNI_NIE_PATTERN = re.compile(r"^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$")
 
@@ -14,6 +20,8 @@ PDF_EJEMPLO = os.path.join(os.path.dirname(__file__), "..", "entrada", "NOMINAS_
 PDF_EJEMPLO_NUESTRAFARMA = os.path.join(
     os.path.dirname(__file__), "..", "entrada", "NUESTRAFARMA NOMINA_052026 v2.pdf"
 )
+PDF_EJEMPLO_FORMACION = os.path.join(os.path.dirname(__file__), "..", "entrada", "Nom 0626-2.PDF")
+NIF_FORMACION = "B88471149"
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(PDF_EJEMPLO),
@@ -87,3 +95,120 @@ def test_extraer_mes_nomina_devuelve_none_si_no_hay_cabecera_periodo(tmp_path):
 
 def test_extraer_mes_nomina_devuelve_none_si_pagina_fuera_de_rango():
     assert extraer_mes_nomina(PDF_EJEMPLO, 9999) is None
+
+
+# --- Líquido a percibir: extracción exitosa por gestoría ya soportada -------------
+#
+# Las tres empresas del cliente comparten la misma gestoría (mismo anclaje "LIQUIDO A
+# PERCIBIR" en las mismas coordenadas relativas), así que estos tres PDFs de ejemplo
+# reales cubren la única gestoría soportada hoy, con datos y NIFs distintos cada uno.
+
+
+def test_detectar_nominas_extrae_liquido_a_percibir_en_todas_mediform_plus():
+    nominas = detectar_nominas(PDF_EJEMPLO, NIF_MEDIFORM_PLUS)
+
+    for nomina in nominas:
+        assert nomina.liquido_a_percibir is not None
+
+    assert nominas[0].liquido_a_percibir == "1.572,84"  # ALCALDE LASAOSA, NICOLAS
+
+
+@pytest.mark.skipif(
+    not os.path.exists(PDF_EJEMPLO_NUESTRAFARMA),
+    reason="Requiere 'NUESTRAFARMA NOMINA_052026 v2.pdf' en entrada/ (no versionado por ser dato sensible)",
+)
+def test_detectar_nominas_extrae_liquido_a_percibir_nuestrafarma():
+    nominas = detectar_nominas(PDF_EJEMPLO_NUESTRAFARMA, "B27523299")
+
+    assert len(nominas) == 1
+    assert nominas[0].liquido_a_percibir == "1.980,47"
+
+
+@pytest.mark.skipif(
+    not os.path.exists(PDF_EJEMPLO_FORMACION),
+    reason="Requiere 'Nom 0626-2.PDF' en entrada/ (no versionado por ser dato sensible)",
+)
+def test_detectar_nominas_extrae_liquido_a_percibir_formacion():
+    nominas = detectar_nominas(PDF_EJEMPLO_FORMACION, NIF_FORMACION)
+
+    assert len(nominas) > 0
+    for nomina in nominas:
+        assert nomina.liquido_a_percibir is not None
+
+
+# --- Líquido a percibir: fallback silencioso al campo manual ----------------------
+
+
+def test_extraer_liquido_a_percibir_devuelve_none_si_no_hay_cabecera(tmp_path):
+    ruta = tmp_path / "sin_liquido.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((100, 100), "Un PDF cualquiera sin la cabecera esperada.")
+    doc.save(str(ruta))
+    doc.close()
+
+    doc_leido = fitz.open(str(ruta))
+    assert _extraer_liquido_a_percibir(doc_leido[0]) is None
+
+
+def test_extraer_liquido_a_percibir_devuelve_none_si_no_hay_valor_debajo(tmp_path):
+    ruta = tmp_path / "liquido_sin_valor.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((100, 100), "LIQUIDO A PERCIBIR")
+    doc.save(str(ruta))
+    doc.close()
+
+    doc_leido = fitz.open(str(ruta))
+    assert _extraer_liquido_a_percibir(doc_leido[0]) is None
+
+
+def test_extraer_liquido_a_percibir_devuelve_none_si_el_valor_no_es_un_importe_valido(tmp_path):
+    ruta = tmp_path / "liquido_invalido.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((100, 100), "LIQUIDO A PERCIBIR")
+    page.insert_text((105, 115), "N/D")  # ni un importe ni un formato reconocible
+    doc.save(str(ruta))
+    doc.close()
+
+    doc_leido = fitz.open(str(ruta))
+    assert _extraer_liquido_a_percibir(doc_leido[0]) is None
+
+
+def test_extraer_liquido_a_percibir_acepta_un_importe_valido_bajo_la_cabecera(tmp_path):
+    ruta = tmp_path / "liquido_valido.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((100, 100), "LIQUIDO A PERCIBIR")
+    page.insert_text((105, 115), "1.234,56")
+    doc.save(str(ruta))
+    doc.close()
+
+    doc_leido = fitz.open(str(ruta))
+    assert _extraer_liquido_a_percibir(doc_leido[0]) == "1.234,56"
+
+
+def test_gestoria_sin_el_patron_de_liquido_no_bloquea_la_deteccion_de_nominas(tmp_path):
+    """Requisito explícito: una gestoría sin el anclaje de líquido a percibir no debe
+    romper ni bloquear el resto del parseo — solo cae a None (campo manual)."""
+    ruta = tmp_path / "nomina_sin_liquido.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "NIF. Z99999999")
+    page.insert_text((72, 130), "TRABAJADOR/A")
+    page.insert_text((300, 130), "CATEGORIA")
+    page.insert_text((72, 145), "PERSONA, DE PRUEBA")
+    page.insert_text((72, 160), "ANTIGUEDAD")
+    page.insert_text((150, 160), "D.N.I.")
+    page.insert_text((150, 175), "12345678A")
+    page.insert_text((72, 500), "3. Cotización adicional horas extraordinarias")
+    page.insert_text((72, 515), "4. Cotización adicional de solidaridad")
+    doc.save(str(ruta))
+    doc.close()
+
+    nominas = detectar_nominas(str(ruta), "Z99999999")
+
+    assert len(nominas) == 1
+    assert nominas[0].liquido_a_percibir is None
+    assert nominas[0].dni_nie == "12345678A"  # el resto del parseo no se ve afectado

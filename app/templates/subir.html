@@ -1,34 +1,60 @@
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Subir nóminas - MEDIFORM PLUS</title>
-</head>
-<body>
-  <h1>Subir PDF mensual de nóminas</h1>
+{% extends "_base.html" %}
+{% set active_page = "subir" %}
+{% block title %}Subir nóminas - MEDIFORM PLUS{% endblock %}
 
-  <p><a href="/empleados">Gestión de empleados</a></p>
+{% block content %}
+<div style="flex:1;display:flex;justify-content:center;padding:48px 24px;">
+  <div style="width:100%;max-width:640px;">
 
-  {% if error %}
-    <p style="color:red"><strong>Error:</strong> {{ error }}</p>
-  {% endif %}
+    <div style="margin-bottom:22px;">
+      <div style="font-size:12px;color:#5b6472;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:6px;">Paso 1 de 2</div>
+      <h1 style="margin:0;font-size:24px;font-weight:700;color:#14213d;">Subir nómina mensual</h1>
+      <p style="margin:8px 0 0;font-size:14px;color:#5b6472;line-height:1.5;">Sube el PDF que envía la gestoría. La aplicación lo separará automáticamente en nóminas individuales y las emparejará con la ficha de cada empleado.</p>
+    </div>
 
-  <form action="/subir" method="post" enctype="multipart/form-data">
-    <p>
-      <label for="empresa_id">Empresa:</label>
-      <select id="empresa_id" name="empresa_id" required>
-        {% for empresa in empresas %}
-          <option value="{{ empresa.id }}" {% if empresa.id == empresa_id_seleccionada %}selected{% endif %}>{{ empresa.nombre }}</option>
-        {% endfor %}
-      </select>
-    </p>
-    <p>
-      <input type="file" id="pdf" name="pdf" accept="application/pdf" required>
-    </p>
-    <p>
-      <small>El mes de la nómina se detecta solo a partir del contenido del PDF — podrás corregirlo en la pantalla siguiente si hace falta.</small>
-    </p>
-    <button type="submit">Subir y analizar</button>
-  </form>
-</body>
-</html>
+    {% if error %}
+      <div style="display:flex;gap:8px;background:#fbe9e9;border:1px solid #f0c6c6;border-radius:6px;padding:10px 12px;margin-bottom:16px;">
+        <span style="color:#991b1b;font-size:14px;flex-shrink:0;">✕</span>
+        <span style="font-size:13px;color:#991b1b;line-height:1.5;"><strong>Error:</strong> {{ error }}</span>
+      </div>
+    {% endif %}
+
+    <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);padding:32px;">
+      <form action="/subir" method="post" enctype="multipart/form-data">
+
+        <div style="margin-bottom:22px;">
+          <label for="empresa_id" style="display:block;font-size:13px;font-weight:600;color:#1f2937;margin-bottom:6px;">Empresa</label>
+          <select id="empresa_id" name="empresa_id" required style="width:100%;padding:10px 12px;font-size:14px;border:1px solid #c7cfd9;border-radius:6px;background:#fff;color:#1f2937;">
+            {% for empresa in empresas %}
+              <option value="{{ empresa.id }}" {% if empresa.id == empresa_id_seleccionada %}selected{% endif %}>{{ empresa.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:13px;font-weight:600;color:#1f2937;margin-bottom:6px;">Archivo PDF de nóminas</label>
+          <div style="border:1.5px dashed #b6c0cc;border-radius:8px;padding:28px 20px;text-align:center;background:#f9fafb;position:relative;">
+            <input type="file" id="pdf" name="pdf" accept="application/pdf" required
+                   style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;"
+                   onchange="document.getElementById('nombre_archivo_elegido').textContent = this.files[0] ? this.files[0].name : '';">
+            <div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:4px;">Arrastra el PDF aquí o haz clic para seleccionarlo</div>
+            <div id="nombre_archivo_elegido" style="font-size:12.5px;color:#8b93a1;"></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;background:#eef4fb;border:1px solid #d3e3f5;border-radius:6px;padding:10px 12px;margin-top:16px;">
+          <span style="color:#1d4ed8;font-size:14px;flex-shrink:0;">ℹ</span>
+          <span style="font-size:12.5px;color:#375a86;line-height:1.5;">El mes de la nómina se detecta automáticamente a partir del contenido del PDF. Podrás corregirlo en el siguiente paso si no fuese correcto.</span>
+        </div>
+
+        <button type="submit" style="margin-top:24px;width:100%;padding:12px;background:#14213d;color:#fff;border:none;border-radius:6px;font-size:14.5px;font-weight:700;cursor:pointer;">Subir y analizar →</button>
+      </form>
+    </div>
+
+    <div style="text-align:center;margin-top:18px;">
+      <a href="/empleados" style="font-size:13px;text-decoration:none;font-weight:600;">Ir a Gestión de empleados</a>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

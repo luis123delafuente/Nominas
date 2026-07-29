@@ -1,5 +1,3 @@
-from unittest.mock import Mock
-
 import fitz
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +23,10 @@ def client(tmp_path, monkeypatch):
     salida_dir = tmp_path / "salida"
     monkeypatch.setattr(main_module, "get_connection", lambda db_path=ruta_db: get_connection(db_path))
     monkeypatch.setattr(main_module, "SALIDA_DIR", salida_dir)
-    monkeypatch.setattr("app.mailer_macos.subprocess.run", lambda *a, **k: Mock(returncode=0, stderr=""))
+    # No se configuran credenciales_smtp para estas empresas de prueba: enviar_nomina()
+    # fallará de forma controlada (ConfiguracionInvalida, capturada internamente) sin
+    # llegar a intentar una conexión SMTP real. Esta prueba solo verifica el cifrado y
+    # la separación por carpetas, que ocurren antes de intentar el envío.
 
     conn = get_connection(ruta_db)
     init_db(conn)
@@ -50,6 +51,8 @@ def _confirmar_una_nomina(test_client, ruta_pdf_maestro, empresa_id, mes_nomina,
         empleado_dni="12345678A",
         envio_previo_fecha=None,
         incluir_por_defecto=True,
+        liquido_a_percibir=None,
+        liquido_metodo="manual",
     )
     main_module.estado_actual = LoteRevision(
         ruta_pdf_maestro=str(ruta_pdf_maestro), mes_nomina=mes_nomina, empresa_id=empresa_id, filas=[fila]

@@ -4,8 +4,10 @@ __pycache__/
 .DS_Store
 
 data/*.db
+data/clave_cifrado.key
 entrada/*.pdf
 salida/**/*.pdf
+salida/**/*.xml
 logs/*.log
 
 config.local.py

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import fitz
 from pypdf import PdfReader, PdfWriter
 
+from app.sepa import ImporteInvalido, parsear_importe_a_centimos
+
 CIERRE_PATTERN = re.compile(r"Cotización adicional de solidaridad", re.IGNORECASE)
 
 # Patrón genérico para detectar CUALQUIER NIF/CIF con formato reconocible en el PDF,
@@ -18,6 +20,8 @@ CATEGORIA_HEADER = "CATEGORIA"
 ANTIGUEDAD_HEADER = "ANTIGUEDAD"
 DNI_HEADER = "D.N.I."
 PERIODO_HEADER = "PERIODO"
+LIQUIDO_HEADER_1 = "LIQUIDO"
+LIQUIDO_HEADER_2 = "PERCIBIR"
 
 DNI_NIE_PATTERN = re.compile(r"^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$")
 
@@ -56,6 +60,7 @@ class NominaDetectada:
     pagina_fin: int
     nombre_trabajador: str
     dni_nie: str | None  # None si esa nómina concreta no tenía un D.N.I. con formato reconocible
+    liquido_a_percibir: str | None  # None si no se pudo autoextraer con confianza — cae al campo manual
 
 
 def _fila_bajo_cabecera(words, header_y: float, x_min: float, x_max: float) -> str:
@@ -109,6 +114,38 @@ def _extraer_dni_trabajador(page: fitz.Page) -> str | None:
     dni_candidato = dni_candidato.replace(" ", "").upper()
 
     return dni_candidato if DNI_NIE_PATTERN.match(dni_candidato) else None
+
+
+def _extraer_liquido_a_percibir(page: fitz.Page) -> str | None:
+    """Devuelve el importe bajo la cabecera 'LIQUIDO A PERCIBIR', o None si no se pudo
+    autoextraer con confianza (anclaje no encontrado o texto que no es un importe con
+    formato válido).
+
+    Igual que el D.N.I., la ausencia de este dato en una nómina concreta no es un error
+    fatal del parseo: es una ayuda para precargar el campo manual ya existente en la
+    pantalla de revisión (Fase 2), nunca un dato crítico que bloquee la subida. La
+    validación de formato reutiliza `parsear_importe_a_centimos` (la misma que usa el
+    generador SEPA) para no aceptar en silencio un texto que "parece" un importe pero
+    no lo es — así el nivel de confianza (autoextraído vs. manual) es honesto.
+    """
+    words = page.get_text("words")
+
+    liquido_x = next((x0 for x0, y0, x1, y1, w, *_ in words if w == LIQUIDO_HEADER_1), None)
+    percibir_x1 = next((x1 for x0, y0, x1, y1, w, *_ in words if w == LIQUIDO_HEADER_2), None)
+    if liquido_x is None or percibir_x1 is None:
+        return None
+
+    header_y = min(y0 for x0, y0, x1, y1, w, *_ in words if w in (LIQUIDO_HEADER_1, LIQUIDO_HEADER_2))
+    importe_candidato = _fila_bajo_cabecera(words, header_y, x_min=liquido_x, x_max=percibir_x1)
+    if not importe_candidato:
+        return None
+
+    try:
+        parsear_importe_a_centimos(importe_candidato)
+    except ImporteInvalido:
+        return None
+
+    return importe_candidato
 
 
 def _extraer_mes_nomina(page: fitz.Page) -> str | None:
@@ -193,8 +230,15 @@ def detectar_nominas(ruta_pdf: str, nif_esperado: str) -> list[NominaDetectada]:
 
         nombre = _extraer_nombre_trabajador(doc[inicio])
         dni_nie = _extraer_dni_trabajador(doc[inicio])
+        liquido_a_percibir = _extraer_liquido_a_percibir(doc[inicio])
         nominas.append(
-            NominaDetectada(pagina_inicio=inicio, pagina_fin=fin, nombre_trabajador=nombre, dni_nie=dni_nie)
+            NominaDetectada(
+                pagina_inicio=inicio,
+                pagina_fin=fin,
+                nombre_trabajador=nombre,
+                dni_nie=dni_nie,
+                liquido_a_percibir=liquido_a_percibir,
+            )
         )
 
     return nominas

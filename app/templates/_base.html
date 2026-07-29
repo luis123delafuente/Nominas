@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}MEDIFORM PLUS — Gestión de Nóminas{% endblock %}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #eef1f5; color: #1f2937; }
+    ::placeholder { color: #9aa5b1; }
+    a { color: #1d4ed8; }
+    a:hover { color: #14357e; }
+    table { border-collapse: collapse; width: 100%; }
+    details > summary { list-style: none; cursor: pointer; }
+    details > summary::-webkit-details-marker { display: none; }
+  </style>
+  {% block extra_style %}{% endblock %}
+</head>
+<body>
+<div style="min-height:100vh;display:flex;flex-direction:column;">
+
+  <header style="background:#14213d;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:64px;flex-shrink:0;">
+    <div style="display:flex;align-items:baseline;gap:10px;">
+      <span style="font-size:16px;font-weight:700;letter-spacing:0.3px;">MEDIFORM PLUS</span>
+      <span style="font-size:13px;color:#aab6cc;">Gestión de Nóminas</span>
+    </div>
+    <nav style="display:flex;gap:4px;">
+      <a href="/" style="text-decoration:none;font-size:13.5px;font-weight:600;padding:8px 14px;border-radius:5px;{% if active_page == 'subir' %}color:#fff;background:rgba(255,255,255,0.14);{% else %}color:#c4cede;{% endif %}">Subir PDF mensual</a>
+      <a href="/revisar" style="text-decoration:none;font-size:13.5px;font-weight:600;padding:8px 14px;border-radius:5px;{% if active_page == 'revisar' %}color:#fff;background:rgba(255,255,255,0.14);{% else %}color:#c4cede;{% endif %}">Revisar nóminas</a>
+      <a href="/empleados" style="text-decoration:none;font-size:13.5px;font-weight:600;padding:8px 14px;border-radius:5px;{% if active_page == 'empleados' %}color:#fff;background:rgba(255,255,255,0.14);{% else %}color:#c4cede;{% endif %}">Gestión de empleados</a>
+    </nav>
+  </header>
+
+  <div style="flex:1;display:flex;flex-direction:column;">
+    {% block content %}{% endblock %}
+  </div>
+</div>
+</body>
+</html>

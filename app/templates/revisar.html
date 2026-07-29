@@ -1,116 +1,270 @@
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Revisar nóminas - MEDIFORM PLUS</title>
-</head>
-<body>
-  <h1>Revisión de nóminas detectadas — nómina de {{ mes_nomina }}</h1>
+{% extends "_base.html" %}
+{% set active_page = "revisar" %}
+{% block title %}Revisar nóminas - MEDIFORM PLUS{% endblock %}
 
-  <form action="/revisar/mes_nomina" method="post">
-    <label for="mes_nomina_input">Mes de la nómina (AAAA-MM):</label>
-    <input type="text" id="mes_nomina_input" name="mes_nomina" pattern="\d{4}-\d{2}" value="{{ mes_nomina }}" required>
-    <button type="submit">Actualizar</button>
-    <small>Detectado del propio PDF — corrígelo aquí si no es correcto (recalcula los avisos de "ya enviado").</small>
-  </form>
+{% block content %}
+{% set estado_meta = {
+  "dni_exacto": {"icon": "✓", "text": "DNI exacto", "bg": "#eafaf0", "border": "#bfe5cb", "color": "#166534", "dot": "#16a34a"},
+  "dni_con_alerta_nombre": {"icon": "⚠", "text": "DNI ok, nombre no cuadra", "bg": "#fdf3de", "border": "#f3d9a4", "color": "#92400e", "dot": "#d97706"},
+  "fuzzy_nombre": {"icon": "🔎", "text": "Solo por nombre, sin DNI", "bg": "#fdf3de", "border": "#f3d9a4", "color": "#92400e", "dot": "#d97706"},
+  "sin_match": {"icon": "✕", "text": "Sin match — revisar ficha", "bg": "#fbe9e9", "border": "#f0c6c6", "color": "#991b1b", "dot": "#dc2626"},
+} %}
+{% set seleccionadas_inicial = filas | selectattr("incluir_por_defecto") | list | length %}
 
-  <p>
-    <strong>Modo de envío: {{ "PRUEBA" if modo_envio == "prueba" else "PRODUCCIÓN" }}</strong>
-    {% if modo_envio == "prueba" %}
-      — todos los correos llegarán a tu email de pruebas, nunca al empleado real.
-    {% else %}
-      — los correos irán al email real de cada empleado.
-    {% endif %}
-  </p>
+<div style="flex:1;padding:32px 32px 64px;max-width:1440px;width:100%;margin:0 auto;">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:16px;">
+    <div>
+      <div style="font-size:12px;color:#5b6472;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:6px;">Paso 2 de 2 · Revisión manual</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h1 style="margin:0;font-size:24px;font-weight:700;color:#14213d;">Revisión de nóminas detectadas — {{ mes_nomina }}</h1>
+        <form action="/revisar/mes_nomina" method="post" style="display:flex;align-items:center;gap:6px;">
+          <input type="text" name="mes_nomina" pattern="\d{4}-\d{2}" value="{{ mes_nomina }}" required
+                 style="font-size:13px;border:1px solid #c7cfd9;border-radius:6px;padding:6px 8px;width:100px;">
+          <button type="submit" style="border:none;background:none;color:#1d4ed8;font-size:13px;font-weight:600;cursor:pointer;padding:2px 4px;">Corregir mes</button>
+        </form>
+      </div>
+      <p style="margin:6px 0 0;font-size:12px;color:#8b93a1;">Detectado del propio PDF — corrígelo si no es correcto (recalcula los avisos de "ya enviado").</p>
+    </div>
+
+    <div style="display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid #d7dde5;border-radius:8px;padding:8px 14px;">
+      <span style="font-size:12.5px;font-weight:600;color:#5b6472;">Modo de envío:</span>
+      <span style="display:inline-flex;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:20px;{% if modo_envio == 'prueba' %}background:#fdf3de;color:#92400e;border:1px solid #f3d9a4;{% else %}background:#fbe9e9;color:#991b1b;border:1px solid #f0c6c6;{% endif %}">{{ "🧪 PRUEBA" if modo_envio == "prueba" else "🚨 PRODUCCIÓN" }}</span>
+    </div>
+  </div>
+
+  <div style="{% if modo_envio == 'prueba' %}background:#fef6e7;border:1.5px solid #f0c674;color:#7a4a00;{% else %}background:#fce8e8;border:1.5px solid #e59a9a;color:#7f1d1d;{% endif %}display:flex;align-items:center;gap:10px;border-radius:8px;padding:12px 16px;">
+    <span style="font-size:18px;">{{ "🧪" if modo_envio == "prueba" else "🚨" }}</span>
+    <span style="font-size:13.5px;font-weight:600;line-height:1.4;">
+      {% if modo_envio == "prueba" %}
+        MODO DE PRUEBA ACTIVO — todos los correos se enviarán a la cuenta de pruebas, no llegarán a los empleados reales.
+      {% else %}
+        MODO PRODUCCIÓN — los correos se enviarán a las direcciones reales de cada empleado con datos sensibles. Revisa cuidadosamente antes de continuar.
+      {% endif %}
+    </span>
+  </div>
 
   {% if resultados is not none %}
-    <h2>Resultado del envío</h2>
-    {% if resultados %}
-      <ul>
-        {% for r in resultados %}
-          <li>
-            {% if r.estado == "enviado" %}✅{% else %}❌{% endif %}
-            empleado_id {{ r.empleado_id }} — {{ r.estado }} — enviado a: {{ r.email_destino }}
-            {% if r.email_produccion %} (destinatario real en producción: {{ r.email_produccion }}){% endif %}
-            {% if r.detalle %} — detalle: {{ r.detalle }}{% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p>No se ha confirmado ninguna nómina para enviar.</p>
-    {% endif %}
-    <hr>
+    <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);overflow:hidden;margin-top:24px;">
+      <div style="padding:16px 18px;border-bottom:1px solid #e6e9ee;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">📤</span>
+        <h2 style="margin:0;font-size:15px;font-weight:700;color:#14213d;">Resultado del envío — {{ mes_nomina }} ({{ "PRUEBA" if modo_envio == "prueba" else "PRODUCCIÓN" }})</h2>
+      </div>
+      {% if resultados %}
+        <table style="font-size:13px;">
+          <tbody>
+            {% for r in resultados %}
+              {% set fila_r = (filas | selectattr("empleado_id", "equalto", r.empleado_id) | list | first) %}
+              <tr style="border-bottom:1px solid #f0f2f5;">
+                <td style="padding:10px 18px;font-weight:600;color:#1f2937;">{{ fila_r.empleado_nombre if fila_r else "Empleado #" ~ r.empleado_id }}</td>
+                <td style="padding:10px;color:#374151;">{{ r.email_destino }}{% if r.email_produccion %} <span style="color:#8b93a1;">(real en producción: {{ r.email_produccion }})</span>{% endif %}</td>
+                <td style="padding:10px 18px;text-align:right;">
+                  {% if r.estado == "enviado" %}
+                    <span style="color:#166534;font-weight:700;font-size:12px;">✓ Enviado</span>
+                  {% else %}
+                    <span style="color:#991b1b;font-weight:700;font-size:12px;">✕ Error{% if r.detalle %} — {{ r.detalle }}{% endif %}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p style="padding:16px 18px;font-size:13px;color:#5b6472;">No se ha confirmado ninguna nómina para enviar.</p>
+      {% endif %}
+    </div>
   {% endif %}
 
-  <form action="/revisar/confirmar" method="post">
-    <table border="1" cellpadding="6" cellspacing="0">
-      <tr>
-        <th>#</th>
-        <th>Nombre (PDF)</th>
-        <th>DNI (PDF)</th>
-        <th>Empleado emparejado</th>
-        <th>Email</th>
-        <th>Estado del match</th>
-        <th>Envíos previos</th>
-        <th>Score nombre</th>
-        <th>Vista previa</th>
-        <th>Incluir en envío</th>
-      </tr>
-      {% for fila in filas %}
-        {% if fila.metodo == "dni_exacto" %}
-          {% set color = "#d4edda" %}
-        {% elif fila.metodo == "dni_con_alerta_nombre" %}
-          {% set color = "#fff3cd" %}
-        {% elif fila.metodo == "fuzzy_nombre" %}
-          {% set color = "#fff3cd" %}
-        {% else %}
-          {% set color = "#f8d7da" %}
-        {% endif %}
-        <tr style="background-color: {{ color }}">
-          <td>{{ fila.numero }}</td>
-          <td>{{ fila.nombre_pdf }}</td>
-          <td>{{ fila.dni_pdf or "—" }}</td>
-          <td>{{ fila.empleado_nombre or "(sin empleado emparejado)" }}</td>
-          <td>{{ fila.empleado_email or "—" }}</td>
-          <td>
-            {% if fila.metodo == "dni_exacto" %}
-              ✅ DNI exacto — autoconfirmado
-            {% elif fila.metodo == "dni_con_alerta_nombre" %}
-              ⚠️ DNI coincide pero el nombre no cuadra — revisar a mano:
-              <br>PDF: "{{ fila.nombre_pdf }}" vs. ficha: "{{ fila.empleado_nombre }}"
-            {% elif fila.metodo == "fuzzy_nombre" %}
-              🔎 Coincidencia por nombre (sin DNI en la nómina) — revisar a mano
-            {% else %}
-              ❌ Sin match — hay que dar de alta al empleado o corregir su ficha
-            {% endif %}
-          </td>
-          <td style="{{ 'background-color:#cfe2ff' if fila.envio_previo_fecha else '' }}">
-            {% if fila.envio_previo_fecha %}
-              📨 Ya se envió el {{ fila.envio_previo_fecha }} — revisa antes de reenviar
-            {% else %}
-              —
-            {% endif %}
-          </td>
-          <td>{{ "%.1f"|format(fila.score_nombre) }}</td>
-          <td>
-            <details>
-              <summary>Ver</summary>
-              <iframe src="/revisar/preview/{{ fila.numero }}" width="400" height="500"></iframe>
-            </details>
-          </td>
-          <td>
-            {% if fila.metodo == "sin_match" %}
-              no disponible
-            {% else %}
-              <input type="checkbox" name="incluir" value="{{ fila.numero }}" {% if fila.incluir_por_defecto %}checked{% endif %}>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-    </table>
-    <p><button type="submit">Enviar</button></p>
+  <form id="form_envio" action="/revisar/confirmar" method="post">
+    <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);overflow:hidden;margin-top:16px;">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e6e9ee;flex-wrap:wrap;gap:10px;">
+        <div style="font-size:13.5px;color:#374151;">
+          <strong id="resumen_seleccionadas">{{ seleccionadas_inicial }}</strong> de <strong>{{ filas|length }}</strong> nóminas seleccionadas para el envío
+        </div>
+        <div style="display:flex;gap:18px;font-size:12.5px;color:#5b6472;">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px;"></span>Autoconfirmado</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#d97706;margin-right:5px;"></span>Revisar</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#dc2626;margin-right:5px;"></span>Sin match</span>
+        </div>
+      </div>
+
+      <table id="tabla_nominas" style="font-size:13px;">
+        <thead>
+          <tr style="background:#f4f6f9;">
+            <th style="text-align:left;padding:10px 10px 10px 18px;border-bottom:2px solid #dde3ea;width:32px;">#</th>
+            <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Nombre (PDF)</th>
+            <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">DNI (PDF)</th>
+            <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Empleado emparejado</th>
+            <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Email</th>
+            <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Estado del match</th>
+            <th style="text-align:right;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Score</th>
+            <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Vista previa</th>
+            <th style="text-align:center;padding:10px 18px 10px 10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Incluir</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fila in filas %}
+            {% set meta = estado_meta[fila.metodo] %}
+            <tr style="border-bottom:1px solid #f0f2f5;{% if fila.metodo == 'sin_match' %}background:#fdf8f8;{% endif %}">
+              <td style="padding:10px 10px 10px 18px;vertical-align:top;color:#8b93a1;">{{ fila.numero }}</td>
+              <td style="padding:10px;vertical-align:top;font-weight:600;color:#1f2937;">{{ fila.nombre_pdf }}</td>
+              <td style="padding:10px;vertical-align:top;color:#374151;font-variant-numeric:tabular-nums;">{{ fila.dni_pdf or "—" }}</td>
+              <td style="padding:10px;vertical-align:top;">
+                <div style="color:#1f2937;font-weight:600;">{{ fila.empleado_nombre or "(sin empleado emparejado)" }}</div>
+                {% if fila.metodo == "dni_con_alerta_nombre" %}
+                  <div style="display:flex;gap:6px;align-items:flex-start;background:#fdf3de;border:1px solid #f3d9a4;border-radius:5px;padding:6px 8px;margin-top:6px;max-width:260px;">
+                    <span style="color:#92400e;font-size:12px;flex-shrink:0;">⚠</span>
+                    <span style="font-size:11.5px;color:#7a4a00;line-height:1.4;">PDF: "{{ fila.nombre_pdf }}" vs. ficha: "{{ fila.empleado_nombre }}"</span>
+                  </div>
+                {% endif %}
+                {% if fila.envio_previo_fecha %}
+                  <div style="display:flex;gap:6px;align-items:flex-start;background:#eaf1fd;border:1px solid #cfe0f7;border-radius:5px;padding:6px 8px;margin-top:6px;max-width:260px;">
+                    <span style="color:#1d4ed8;font-size:12px;flex-shrink:0;">📨</span>
+                    <span style="font-size:11.5px;color:#375a86;line-height:1.4;">Ya se envió el {{ fila.envio_previo_fecha }} — revisa antes de reenviar.</span>
+                  </div>
+                {% endif %}
+              </td>
+              <td style="padding:10px;vertical-align:top;color:#374151;">{{ fila.empleado_email or "—" }}</td>
+              <td style="padding:10px;vertical-align:top;">
+                <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:20px;background:{{ meta.bg }};color:{{ meta.color }};border:1px solid {{ meta.border }};white-space:nowrap;">{{ meta.icon }} {{ meta.text }}</span>
+              </td>
+              <td style="padding:10px;vertical-align:top;text-align:right;color:#8b93a1;font-variant-numeric:tabular-nums;">{{ "%.1f"|format(fila.score_nombre) }}</td>
+              <td style="padding:10px;vertical-align:top;">
+                <details>
+                  <summary style="display:inline-block;border:1px solid #c7cfd9;background:#fff;border-radius:5px;padding:5px 10px;font-size:12px;font-weight:600;color:#374151;">Vista previa</summary>
+                  <div style="margin-top:8px;">
+                    <iframe src="/revisar/preview/{{ fila.numero }}" width="220" height="280" style="border:1px solid #dde3ea;border-radius:6px;"></iframe>
+                  </div>
+                </details>
+              </td>
+              <td style="padding:10px 18px 10px 10px;vertical-align:top;text-align:center;">
+                {% if fila.metodo == "sin_match" %}
+                  <span style="font-size:11.5px;color:#8b93a1;">no disponible</span>
+                {% else %}
+                  <input type="checkbox" name="incluir" value="{{ fila.numero }}" onchange="actualizarSeleccionadas()" {% if fila.incluir_por_defecto %}checked{% endif %} style="width:16px;height:16px;cursor:pointer;">
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div style="padding:18px;border-top:1px solid #e6e9ee;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:#fafbfc;">
+        <span style="font-size:12.5px;color:#8b93a1;">Los correos se enviarán cifrados con contraseña individual a cada empleado.</span>
+
+        <div id="zona_envio_normal" style="display:flex;">
+          <button type="button" onclick="iniciarConfirmacionEnvio()" style="border:none;background:#b91c1c;color:#fff;border-radius:6px;padding:11px 20px;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(185,28,28,0.3);">Enviar <span id="contador_seleccionadas">{{ seleccionadas_inicial }}</span> nóminas →</button>
+        </div>
+        <div id="zona_envio_confirmacion" style="display:none;align-items:center;gap:12px;background:#fff4ea;border:1px solid #f3d9a4;border-radius:6px;padding:10px 14px;flex-wrap:wrap;">
+          <span style="font-size:13px;color:#92400e;font-weight:600;">¿Confirmas el envío de <span id="contador_confirmacion"></span> nóminas en modo {{ "PRUEBA" if modo_envio == "prueba" else "PRODUCCIÓN" }}?</span>
+          <button type="button" onclick="cancelarConfirmacionEnvio()" style="border:1px solid #c7cfd9;background:#fff;border-radius:5px;padding:7px 12px;font-size:12.5px;font-weight:600;color:#374151;cursor:pointer;">Cancelar</button>
+          <button type="submit" style="border:none;background:#b91c1c;color:#fff;border-radius:5px;padding:7px 14px;font-size:12.5px;font-weight:700;cursor:pointer;">Sí, enviar ahora</button>
+        </div>
+      </div>
+    </div>
   </form>
 
-  <p><a href="/">Subir otro PDF</a> — <a href="/empleados">Gestión de empleados</a></p>
-</body>
-</html>
+  <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);overflow:hidden;margin-top:24px;">
+    <div style="padding:16px 18px;border-bottom:1px solid #e6e9ee;">
+      <h2 style="margin:0;font-size:15px;font-weight:700;color:#14213d;">🏦 Fichero de transferencias SEPA — {{ mes_nomina }}</h2>
+      <p style="margin:4px 0 0;font-size:12px;color:#8b93a1;">Genera el fichero pain.001.001.03 para subir manualmente a la banca online. La aplicación nunca ejecuta transferencias ni se conecta al banco.</p>
+    </div>
+
+    {% if error_sepa %}
+      <div style="display:flex;gap:8px;background:#fbe9e9;border:1px solid #f0c6c6;border-radius:6px;padding:10px 12px;margin:14px 18px 0;">
+        <span style="color:#991b1b;font-size:14px;flex-shrink:0;">✕</span>
+        <span style="font-size:13px;color:#991b1b;line-height:1.5;"><strong>No se ha generado el fichero:</strong> {{ error_sepa }}</span>
+      </div>
+    {% endif %}
+
+    {% if not cuentas_bancarias %}
+      <p style="padding:16px 18px;font-size:13px;color:#5b6472;">No hay ninguna cuenta bancaria activa configurada para esta empresa. Da de alta una con <code>scripts/gestionar_cuenta_bancaria.py</code>.</p>
+    {% else %}
+      <form action="/revisar/generar_sepa" method="post">
+        <div style="padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #e6e9ee;">
+          <label for="cuenta_id" style="font-size:12.5px;font-weight:600;color:#1f2937;">Cuenta de pago</label>
+          <select id="cuenta_id" name="cuenta_id" required style="padding:8px 10px;font-size:13px;border:1px solid #c7cfd9;border-radius:6px;background:#fff;color:#1f2937;">
+            {% for cuenta in cuentas_bancarias %}
+              <option value="{{ cuenta.id }}" {% if cuenta.id == cuenta_id_seleccionada %}selected{% endif %}>
+                {{ cuenta.alias or "Cuenta" }} — {{ cuenta.iban }}{% if cuenta.predeterminada %} (predeterminada){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <table style="font-size:13px;">
+          <thead>
+            <tr style="background:#f4f6f9;">
+              <th style="text-align:left;padding:10px 10px 10px 18px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Empleado</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">IBAN</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Líquido a percibir</th>
+              <th style="text-align:center;padding:10px 18px 10px 10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Incluir</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for fila in filas %}
+              {% if fila.empleado_id is not none %}
+                {% set tiene_iban = ibans_disponibles.get(fila.empleado_id, false) %}
+                <tr style="border-bottom:1px solid #f0f2f5;">
+                  <td style="padding:10px 10px 10px 18px;vertical-align:top;font-weight:600;color:#1f2937;">{{ fila.empleado_nombre }}</td>
+                  <td style="padding:10px;vertical-align:top;">
+                    {% if tiene_iban %}
+                      <span style="font-size:11.5px;font-weight:700;color:#166534;">✓ Registrado</span>
+                    {% else %}
+                      <span style="font-size:11.5px;color:#b91c1c;">✕ Sin IBAN — revisa su ficha</span>
+                    {% endif %}
+                  </td>
+                  <td style="padding:10px;vertical-align:top;">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                      <input type="text" name="sepa_liquido_{{ fila.numero }}" value="{{ valores_liquido.get(fila.numero, '') }}"
+                             placeholder="1.234,56" {% if not tiene_iban %}disabled{% endif %}
+                             style="width:120px;padding:6px 8px;font-size:13px;border:1px solid #c7cfd9;border-radius:5px;font-variant-numeric:tabular-nums;">
+                      {% if fila.liquido_metodo == "autoextraido" %}
+                        <span title="Autoextraído del PDF — puedes corregirlo si no es correcto." style="font-size:11.5px;font-weight:700;color:#166534;white-space:nowrap;">✓ Autoextraído</span>
+                      {% else %}
+                        <span title="No se pudo autoextraer con confianza — revisa el PDF e introdúcelo a mano." style="font-size:11.5px;font-weight:700;color:#92400e;white-space:nowrap;">✎ Revisar manualmente</span>
+                      {% endif %}
+                    </div>
+                  </td>
+                  <td style="padding:10px 18px 10px 10px;vertical-align:top;text-align:center;">
+                    <input type="checkbox" name="sepa_incluir" value="{{ fila.numero }}" {% if not tiene_iban %}disabled{% endif %}
+                           {% if fila.numero in sepa_incluidos %}checked{% endif %} style="width:16px;height:16px;cursor:pointer;">
+                  </td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <div style="padding:18px;border-top:1px solid #e6e9ee;display:flex;align-items:center;justify-content:flex-end;background:#fafbfc;">
+          <button type="submit" style="border:none;background:#14213d;color:#fff;border-radius:6px;padding:11px 20px;font-size:13.5px;font-weight:700;cursor:pointer;">Generar fichero SEPA →</button>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+
+  <p style="margin-top:18px;"><a href="/" style="font-size:13px;text-decoration:none;font-weight:600;">Subir otro PDF</a></p>
+
+</div>
+
+<script>
+  function actualizarSeleccionadas() {
+    var seleccionadas = document.querySelectorAll('#tabla_nominas input[name="incluir"]:checked').length;
+    document.getElementById('contador_seleccionadas').textContent = seleccionadas;
+    document.getElementById('resumen_seleccionadas').textContent = seleccionadas;
+  }
+
+  function iniciarConfirmacionEnvio() {
+    var seleccionadas = document.querySelectorAll('#tabla_nominas input[name="incluir"]:checked').length;
+    document.getElementById('contador_confirmacion').textContent = seleccionadas;
+    document.getElementById('zona_envio_normal').style.display = 'none';
+    document.getElementById('zona_envio_confirmacion').style.display = 'flex';
+  }
+
+  function cancelarConfirmacionEnvio() {
+    document.getElementById('zona_envio_confirmacion').style.display = 'none';
+    document.getElementById('zona_envio_normal').style.display = 'flex';
+  }
+</script>
+{% endblock %}

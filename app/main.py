@@ -12,21 +12,27 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pypdf import PdfReader
 
-from app.config import cargar_configuracion
+from app.config import GeneracionBloqueadaPorModoPrueba, cargar_configuracion
 from app.crypto import cifrar_paginas
 from app.db import (
     actualizar_empleado,
+    actualizar_iban_empleado,
     crear_empleado,
     dar_baja_empleado,
+    descifrar_cuenta_bancaria,
     get_connection,
+    listar_cuentas_bancarias,
     listar_empleados,
     listar_empresas,
+    obtener_cuenta_bancaria,
+    obtener_cuenta_predeterminada,
     obtener_empleado,
     obtener_empresa,
     obtener_envio_previo,
+    obtener_iban_empleado,
     reactivar_empleado,
 )
-from app.mailer_macos import enviar_nomina
+from app.mailer_smtp import enviar_nomina
 from app.matcher import emparejar_nomina
 from app.pdf_parser import (
     DNI_NIE_PATTERN,
@@ -37,6 +43,8 @@ from app.pdf_parser import (
     extraer_paginas_bytes,
     nombre_archivo_seguro,
 )
+from app.sepa import ImporteInvalido, PagoSepa, generar_fichero_sepa, parsear_importe_a_centimos
+from app.validaciones_bancarias import normalizar_iban, validar_iban
 
 MES_NOMINA_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -71,6 +79,8 @@ class FilaRevision:
     empleado_dni: str | None
     envio_previo_fecha: str | None  # fecha del último envío "enviado" a este empleado (en esta empresa) este mes, si lo hubo
     incluir_por_defecto: bool
+    liquido_a_percibir: str | None  # autoextraído del PDF si se pudo, si no None (cae al campo manual)
+    liquido_metodo: str  # "autoextraido" / "manual" — honesto: solo "autoextraido" si se validó el formato
 
 
 @dataclass
@@ -170,6 +180,8 @@ def subir_pdf(request: Request, pdf: UploadFile = File(...), empresa_id: int = F
                     empleado_dni=empleado["dni_nie"] if empleado is not None else None,
                     envio_previo_fecha=envio_previo_fecha,
                     incluir_por_defecto=(resultado.metodo == "dni_exacto" and envio_previo_fecha is None),
+                    liquido_a_percibir=nomina.liquido_a_percibir,
+                    liquido_metodo="autoextraido" if nomina.liquido_a_percibir is not None else "manual",
                 )
             )
     finally:
@@ -181,11 +193,43 @@ def subir_pdf(request: Request, pdf: UploadFile = File(...), empresa_id: int = F
     return RedirectResponse(url="/revisar", status_code=303)
 
 
+def _valores_liquido_iniciales() -> dict:
+    """Precarga el campo manual de líquido a percibir (Fase 2) con lo autoextraído del
+    PDF cuando lo hubo (Fase 3) — sigue siendo un texto editable normal, el usuario
+    puede corregirlo igual que si lo hubiera escrito él mismo desde cero."""
+    return {
+        fila.numero: fila.liquido_a_percibir or "" for fila in estado_actual.filas
+    }
+
+
+def _contexto_sepa(conn: sqlite3.Connection) -> dict:
+    """Datos que necesita la sección de generación del fichero SEPA de revisar.html:
+    las cuentas de pago activas de la empresa del lote, cuál es la predeterminada, y
+    qué empleados tienen IBAN registrado (para avisar en la tabla antes de generar)."""
+    cuentas_raw = listar_cuentas_bancarias(conn, estado_actual.empresa_id, solo_activas=True)
+    predeterminada = obtener_cuenta_predeterminada(conn, estado_actual.empresa_id)
+    ibans_disponibles = {
+        fila.empleado_id: bool(obtener_iban_empleado(conn, fila.empleado_id))
+        for fila in estado_actual.filas
+        if fila.empleado_id is not None
+    }
+    return {
+        "cuentas_bancarias": [descifrar_cuenta_bancaria(c) for c in cuentas_raw],
+        "cuenta_id_seleccionada": predeterminada["id"] if predeterminada is not None else None,
+        "ibans_disponibles": ibans_disponibles,
+    }
+
+
 @app.get("/revisar")
 def revisar(request: Request):
     if estado_actual is None:
         return RedirectResponse(url="/")
     config = cargar_configuracion()
+    conn = get_connection()
+    try:
+        contexto_sepa = _contexto_sepa(conn)
+    finally:
+        conn.close()
     return templates.TemplateResponse(
         request,
         "revisar.html",
@@ -194,6 +238,10 @@ def revisar(request: Request):
             "mes_nomina": estado_actual.mes_nomina,
             "modo_envio": config.modo_envio,
             "resultados": None,
+            "error_sepa": None,
+            "valores_liquido": _valores_liquido_iniciales(),
+            "sepa_incluidos": set(),
+            **contexto_sepa,
         },
     )
 
@@ -288,6 +336,8 @@ async def confirmar(request: Request):
                 config,
             )
             resultados.append(resultado)
+
+        contexto_sepa = _contexto_sepa(conn)
     finally:
         conn.close()
 
@@ -299,12 +349,123 @@ async def confirmar(request: Request):
             "mes_nomina": estado_actual.mes_nomina,
             "modo_envio": config.modo_envio,
             "resultados": resultados,
+            "error_sepa": None,
+            "valores_liquido": _valores_liquido_iniciales(),
+            "sepa_incluidos": set(),
+            **contexto_sepa,
         },
     )
 
 
+@app.post("/revisar/generar_sepa")
+async def generar_sepa(request: Request):
+    if estado_actual is None:
+        return RedirectResponse(url="/")
+
+    form = await request.form()
+    cuenta_id_texto = form.get("cuenta_id", "")
+    numeros_incluidos = {int(v) for v in form.getlist("sepa_incluir")}
+    valores_liquido = {fila.numero: form.get(f"sepa_liquido_{fila.numero}", "") for fila in estado_actual.filas}
+
+    config = cargar_configuracion()
+    conn = get_connection()
+    try:
+        contexto_sepa = _contexto_sepa(conn)
+        errores = []
+
+        cuenta = None
+        if not cuenta_id_texto:
+            errores.append("Selecciona una cuenta bancaria de pago.")
+        else:
+            cuenta_row = obtener_cuenta_bancaria(conn, int(cuenta_id_texto))
+            if (
+                cuenta_row is None
+                or cuenta_row["empresa_id"] != estado_actual.empresa_id
+                or not cuenta_row["activa"]
+            ):
+                errores.append("La cuenta bancaria seleccionada no es válida.")
+            else:
+                cuenta = descifrar_cuenta_bancaria(cuenta_row)
+
+        pagos = []
+        for fila in estado_actual.filas:
+            if fila.numero not in numeros_incluidos:
+                continue
+            if fila.empleado_id is None:
+                errores.append(f"Fila {fila.numero}: no se puede incluir una nómina sin empleado emparejado.")
+                continue
+
+            try:
+                importe_centimos = parsear_importe_a_centimos(valores_liquido.get(fila.numero, ""))
+            except ImporteInvalido as exc:
+                errores.append(f"{fila.empleado_nombre}: {exc}")
+                continue
+
+            iban_empleado = obtener_iban_empleado(conn, fila.empleado_id)
+            if not iban_empleado:
+                errores.append(f"{fila.empleado_nombre}: no tiene IBAN registrado en su ficha.")
+                continue
+
+            pagos.append(
+                PagoSepa(
+                    empleado_id=fila.empleado_id,
+                    nombre=fila.empleado_nombre,
+                    iban=iban_empleado,
+                    importe_centimos=importe_centimos,
+                    concepto=f"Nomina {estado_actual.mes_nomina}",
+                    endtoend_id=f"NOM-{estado_actual.mes_nomina}-{fila.empleado_id}",
+                )
+            )
+
+        if not errores and not pagos:
+            errores.append("No se ha seleccionado ninguna nómina para incluir en el fichero SEPA.")
+
+        xml_bytes = None
+        if not errores:
+            empresa = obtener_empresa(conn, estado_actual.empresa_id)
+            carpeta_salida = SALIDA_DIR / empresa["nif"] / estado_actual.mes_nomina
+            ruta_salida = carpeta_salida / f"SEPA_{estado_actual.mes_nomina}.xml"
+            try:
+                xml_bytes = generar_fichero_sepa(
+                    config,
+                    empresa["nombre"],
+                    cuenta["iban"],
+                    cuenta["bic"],
+                    estado_actual.mes_nomina,
+                    pagos,
+                    str(ruta_salida),
+                )
+            except (GeneracionBloqueadaPorModoPrueba, ValueError) as exc:
+                errores.append(str(exc))
+
+        if errores:
+            return templates.TemplateResponse(
+                request,
+                "revisar.html",
+                {
+                    "filas": estado_actual.filas,
+                    "mes_nomina": estado_actual.mes_nomina,
+                    "modo_envio": config.modo_envio,
+                    "resultados": None,
+                    "error_sepa": " ".join(errores),
+                    "valores_liquido": valores_liquido,
+                    "sepa_incluidos": numeros_incluidos,
+                    **{**contexto_sepa, "cuenta_id_seleccionada": int(cuenta_id_texto) if cuenta_id_texto.isdigit() else contexto_sepa["cuenta_id_seleccionada"]},
+                },
+                status_code=400,
+            )
+    finally:
+        conn.close()
+
+    return StreamingResponse(
+        io.BytesIO(xml_bytes),
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="SEPA_{estado_actual.mes_nomina}.xml"'},
+    )
+
+
 def _valores_formulario_vacios() -> dict:
-    return {"id": "", "nombre_completo": "", "dni_nie": "", "email": ""}
+    return {"id": "", "nombre_completo": "", "dni_nie": "", "email": "", "iban": ""}
 
 
 @app.get("/empleados")
@@ -327,6 +488,7 @@ def empleados_vista(
                     "nombre_completo": empleado["nombre_completo"],
                     "dni_nie": empleado["dni_nie"],
                     "email": empleado["email"],
+                    "iban": obtener_iban_empleado(conn, editar_id) or "",
                 }
     finally:
         conn.close()
@@ -351,11 +513,13 @@ def empleados_guardar(
     nombre_completo: str = Form(...),
     dni_nie: str = Form(...),
     email: str = Form(...),
+    iban: str = Form(""),
 ):
     nombre_completo = nombre_completo.strip()
     dni_nie_normalizado = dni_nie.strip().upper().replace(" ", "")
     email = email.strip()
-    valores = {"id": empleado_id, "nombre_completo": nombre_completo, "dni_nie": dni_nie, "email": email}
+    iban = iban.strip()
+    valores = {"id": empleado_id, "nombre_completo": nombre_completo, "dni_nie": dni_nie, "email": email, "iban": iban}
 
     errores = []
     if not nombre_completo:
@@ -364,6 +528,11 @@ def empleados_guardar(
         errores.append(f"DNI/NIE con formato inválido: '{dni_nie}'.")
     if not EMAIL_PATTERN.match(email):
         errores.append(f"Email con formato inválido: '{email}'.")
+    if iban:
+        try:
+            validar_iban(normalizar_iban(iban))
+        except ValueError as exc:
+            errores.append(str(exc))
 
     mensaje = None
     if not errores:
@@ -377,9 +546,13 @@ def empleados_guardar(
                     dni_nie=dni_nie_normalizado,
                     email=email,
                 )
+                actualizar_iban_empleado(conn, int(empleado_id), iban or None)
                 mensaje = f"Empleado actualizado: {nombre_completo}"
             else:
-                crear_empleado(conn, nombre_completo, dni_nie_normalizado, email, datetime.now().date().isoformat())
+                nuevo_id = crear_empleado(
+                    conn, nombre_completo, dni_nie_normalizado, email, datetime.now().date().isoformat()
+                )
+                actualizar_iban_empleado(conn, nuevo_id, iban or None)
                 mensaje = f"Empleado dado de alta: {nombre_completo}"
         except sqlite3.IntegrityError:
             accion = "otro empleado" if empleado_id else "un empleado"

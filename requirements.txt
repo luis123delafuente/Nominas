@@ -7,5 +7,7 @@ pypdf
 cryptography
 rapidfuzz
 openpyxl
+sepaxml
+xmlschema
 pytest
 httpx

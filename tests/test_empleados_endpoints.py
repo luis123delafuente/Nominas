@@ -63,6 +63,49 @@ def test_alta_con_dni_formato_invalido_da_error_legible(client):
     assert "formato inválido" in respuesta.text
 
 
+def test_alta_con_iban_de_formato_invalido_da_error_legible_no_500(client):
+    respuesta = client.post(
+        "/empleados/guardar",
+        data={
+            "empleado_id": "",
+            "nombre_completo": "Con Iban Malo",
+            "dni_nie": "13579246G",
+            "email": "malo@example.com",
+            "iban": "NOESUNIBAN",
+        },
+    )
+
+    assert respuesta.status_code == 400
+    assert "IBAN" in respuesta.text
+
+
+def test_alta_con_iban_checksum_invalido_da_error_legible(client):
+    respuesta = client.post(
+        "/empleados/guardar",
+        data={
+            "empleado_id": "",
+            "nombre_completo": "Con Iban Checksum Malo",
+            "dni_nie": "24681357H",
+            "email": "checksum@example.com",
+            "iban": "ES9121000418450200051333",  # checksum roto a propósito
+        },
+    )
+
+    assert respuesta.status_code == 400
+    assert "dígito de control" in respuesta.text
+
+
+def test_alta_sin_iban_no_da_error(client):
+    respuesta = client.post(
+        "/empleados/guardar",
+        data={"empleado_id": "", "nombre_completo": "Sin Iban", "dni_nie": "97531864I", "email": "siniban@example.com"},
+        follow_redirects=True,
+    )
+
+    assert respuesta.status_code == 200
+    assert "dado de alta" in respuesta.text
+
+
 def test_edicion_de_un_campo(client):
     client.post(
         "/empleados/guardar",

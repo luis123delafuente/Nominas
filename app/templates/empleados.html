@@ -1,118 +1,161 @@
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Empleados - MEDIFORM PLUS</title>
-</head>
-<body>
-  <p><a href="/">Subir nómina</a></p>
+{% extends "_base.html" %}
+{% set active_page = "empleados" %}
+{% block title %}Empleados - MEDIFORM PLUS{% endblock %}
 
-  <h1>Gestión de empleados</h1>
+{% block content %}
+<div style="flex:1;padding:32px;max-width:1320px;width:100%;margin:0 auto;">
 
   {% if mensaje %}
-    <p style="color:green"><strong>{{ mensaje }}</strong></p>
+    <div style="display:flex;gap:8px;background:#eafaf0;border:1px solid #bfe5cb;border-radius:6px;padding:10px 12px;margin-bottom:16px;">
+      <span style="color:#166534;font-size:14px;flex-shrink:0;">✓</span>
+      <span style="font-size:13px;color:#166534;font-weight:600;">{{ mensaje }}</span>
+    </div>
   {% endif %}
   {% if error %}
-    <p style="color:red"><strong>Error:</strong> {{ error }}</p>
+    <div style="display:flex;gap:8px;background:#fbe9e9;border:1px solid #f0c6c6;border-radius:6px;padding:10px 12px;margin-bottom:16px;">
+      <span style="color:#991b1b;font-size:14px;flex-shrink:0;">✕</span>
+      <span style="font-size:13px;color:#991b1b;line-height:1.5;"><strong>Error:</strong> {{ error }}</span>
+    </div>
   {% endif %}
 
-  <h2>{{ "Editar empleado" if valores.id else "Dar de alta un nuevo empleado" }}</h2>
-  <form action="/empleados/guardar" method="post">
-    <input type="hidden" name="empleado_id" value="{{ valores.id }}">
-    <p>
-      <label>Nombre completo:
-        <input type="text" name="nombre_completo" value="{{ valores.nombre_completo }}" required>
-      </label>
-    </p>
-    <p>
-      <label>DNI/NIE:
-        <input type="text" name="dni_nie" value="{{ valores.dni_nie }}" required>
-      </label>
-    </p>
-    <p>
-      <label>Email:
-        <input type="email" name="email" value="{{ valores.email }}" required>
-      </label>
-    </p>
-    <button type="submit">{{ "Guardar cambios" if valores.id else "Dar de alta" }}</button>
-    {% if valores.id %}
-      <a href="/empleados">Cancelar edición</a>
-    {% endif %}
-  </form>
+  <div style="display:grid;grid-template-columns:320px 1fr;gap:24px;align-items:start;">
 
-  <hr>
+    <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);padding:24px;position:sticky;top:32px;">
+      <h2 style="margin:0 0 4px;font-size:16px;font-weight:700;color:#14213d;">{{ "Editar empleado" if valores.id else "Dar de alta un nuevo empleado" }}</h2>
+      <p style="margin:0 0 18px;font-size:12.5px;color:#8b93a1;">{{ "Modifica los datos y guarda los cambios." if valores.id else "Da de alta un nuevo empleado en el directorio." }}</p>
 
-  <h2>Listado de empleados</h2>
-  <p>
-    {% if mostrar_baja %}
-      <a href="/empleados">Mostrar solo activos</a>
-    {% else %}
-      <a href="/empleados?mostrar_baja=1">Mostrar también los de baja</a>
-    {% endif %}
-  </p>
+      <form action="/empleados/guardar" method="post">
+        <input type="hidden" name="empleado_id" value="{{ valores.id }}">
 
-  <p>
-    <label for="buscador_nombre">Buscar por nombre:</label>
-    <input type="text" id="buscador_nombre" oninput="filtrarEmpleadosPorNombre()">
-  </p>
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12.5px;font-weight:600;color:#1f2937;margin-bottom:5px;">Nombre completo</label>
+          <input type="text" name="nombre_completo" value="{{ valores.nombre_completo }}" required
+                 style="width:100%;padding:9px 11px;font-size:13.5px;border:1px solid #c7cfd9;border-radius:6px;">
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12.5px;font-weight:600;color:#1f2937;margin-bottom:5px;">DNI / NIE</label>
+          <input type="text" name="dni_nie" value="{{ valores.dni_nie }}" required
+                 style="width:100%;padding:9px 11px;font-size:13.5px;border:1px solid #c7cfd9;border-radius:6px;font-variant-numeric:tabular-nums;">
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12.5px;font-weight:600;color:#1f2937;margin-bottom:5px;">Email</label>
+          <input type="email" name="email" value="{{ valores.email }}" required
+                 style="width:100%;padding:9px 11px;font-size:13.5px;border:1px solid #c7cfd9;border-radius:6px;">
+        </div>
+        <div style="margin-bottom:20px;">
+          <label style="display:block;font-size:12.5px;font-weight:600;color:#1f2937;margin-bottom:5px;">IBAN (opcional, para pago SEPA)</label>
+          <input type="text" name="iban" value="{{ valores.iban }}" placeholder="ES91 2100 0418 4502 0005 1332"
+                 style="width:100%;padding:9px 11px;font-size:13.5px;border:1px solid #c7cfd9;border-radius:6px;font-variant-numeric:tabular-nums;">
+          <p style="margin:5px 0 0;font-size:11.5px;color:#8b93a1;">Se guarda cifrado. Déjalo en blanco si este empleado todavía no cobra por transferencia SEPA.</p>
+        </div>
 
-  <table border="1" cellpadding="6" cellspacing="0">
-    <tr>
-      <th>Nombre</th>
-      <th>DNI/NIE</th>
-      <th>Email</th>
-      <th>Estado</th>
-      <th>Fecha alta</th>
-      <th>Fecha baja</th>
-      <th>Acciones</th>
-    </tr>
-    {% for e in empleados %}
-      <tr style="background-color: {{ '#f8d7da' if not e.activo else 'inherit' }}" data-nombre="{{ e.nombre_completo }}">
-        <td>{{ e.nombre_completo }}</td>
-        <td>{{ e.dni_nie }}</td>
-        <td>{{ e.email }}</td>
-        <td>{{ "Activo" if e.activo else "Baja" }}</td>
-        <td>{{ e.fecha_alta }}</td>
-        <td>{{ e.fecha_baja or "—" }}</td>
-        <td>
-          <a href="/empleados?editar_id={{ e.id }}{% if mostrar_baja %}&mostrar_baja=1{% endif %}">Editar</a>
-          {% if e.activo %}
-            <form action="/empleados/{{ e.id }}/baja" method="post" style="display:inline">
-              <button type="submit" onclick="return confirm('¿Dar de baja a {{ e.nombre_completo }}?')">Dar de baja</button>
-            </form>
-          {% else %}
-            <form action="/empleados/{{ e.id }}/reactivar" method="post" style="display:inline">
-              <button type="submit" onclick="return confirm('¿Reactivar a {{ e.nombre_completo }}?')">Reactivar</button>
-            </form>
+        <div style="display:flex;gap:8px;">
+          <button type="submit" style="flex:1;padding:10px;background:#14213d;color:#fff;border:none;border-radius:6px;font-size:13.5px;font-weight:700;cursor:pointer;">{{ "Guardar cambios" if valores.id else "Dar de alta" }}</button>
+          {% if valores.id %}
+            <a href="/empleados" style="display:flex;align-items:center;padding:10px 14px;background:#fff;color:#374151;border:1px solid #c7cfd9;border-radius:6px;font-size:13.5px;font-weight:600;text-decoration:none;">Cancelar</a>
           {% endif %}
-        </td>
-      </tr>
-    {% endfor %}
-  </table>
-  <p id="mensaje_sin_resultados" style="display:none">No se encontraron empleados con ese nombre.</p>
+        </div>
+      </form>
+    </div>
 
-  <script>
-    // Normaliza quitando tildes/diacríticos para que "canas" encuentre "CAÑAS".
-    function normalizarNombre(texto) {
-      return texto
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
-    }
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:16px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:12px;color:#5b6472;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:6px;">Directorio</div>
+          <h1 style="margin:0;font-size:22px;font-weight:700;color:#14213d;">Gestión de empleados</h1>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#374151;cursor:pointer;user-select:none;">
+          <input type="checkbox" {% if mostrar_baja %}checked{% endif %}
+                 onchange="window.location.href = this.checked ? '/empleados?mostrar_baja=1' : '/empleados'"
+                 style="width:15px;height:15px;cursor:pointer;">
+          Mostrar también dados de baja
+        </label>
+      </div>
 
-    function filtrarEmpleadosPorNombre() {
-      var texto = normalizarNombre(document.getElementById("buscador_nombre").value.trim());
-      var filas = document.querySelectorAll("table tr[data-nombre]");
-      var visibles = 0;
+      <div style="position:relative;margin-bottom:14px;">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#9aa5b1;font-size:13px;">🔎</span>
+        <input type="text" id="buscador_nombre" oninput="filtrarEmpleadosPorNombre()" placeholder="Buscar por nombre…"
+               style="width:100%;max-width:340px;padding:9px 12px 9px 32px;font-size:13.5px;border:1px solid #c7cfd9;border-radius:6px;background:#fff;">
+      </div>
 
-      filas.forEach(function (fila) {
-        var coincide = normalizarNombre(fila.dataset.nombre).indexOf(texto) !== -1;
-        fila.style.display = coincide ? "" : "none";
-        if (coincide) visibles++;
-      });
+      <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);overflow:hidden;">
+        <table style="font-size:13px;">
+          <thead>
+            <tr style="background:#f4f6f9;">
+              <th style="text-align:left;padding:10px 10px 10px 18px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Nombre</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">DNI / NIE</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Email</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">IBAN</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Estado</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Alta</th>
+              <th style="text-align:left;padding:10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Baja</th>
+              <th style="text-align:right;padding:10px 18px 10px 10px;border-bottom:2px solid #dde3ea;font-weight:700;color:#374151;">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in empleados %}
+              <tr data-nombre="{{ e.nombre_completo }}" style="border-bottom:1px solid #f0f2f5;{% if not e.activo %}background:#fafafa;{% endif %}">
+                <td style="padding:11px 10px 11px 18px;font-weight:600;color:{{ '#1f2937' if e.activo else '#8b93a1' }};">{{ e.nombre_completo }}</td>
+                <td style="padding:11px 10px;color:{{ '#1f2937' if e.activo else '#8b93a1' }};font-variant-numeric:tabular-nums;">{{ e.dni_nie }}</td>
+                <td style="padding:11px 10px;color:{{ '#1f2937' if e.activo else '#8b93a1' }};">{{ e.email }}</td>
+                <td style="padding:11px 10px;">
+                  {% if e.iban_cifrado %}
+                    <span style="font-size:11.5px;font-weight:700;color:#166534;">✓ Registrado</span>
+                  {% else %}
+                    <span style="font-size:11.5px;color:#8b93a1;">— Sin IBAN</span>
+                  {% endif %}
+                </td>
+                <td style="padding:11px 10px;">
+                  <span style="display:inline-flex;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:20px;{% if e.activo %}background:#eafaf0;color:#166534;border:1px solid #bfe5cb;{% else %}background:#eef0f2;color:#57606b;border:1px solid #dde1e6;{% endif %}">{{ "Activo" if e.activo else "Baja" }}</span>
+                </td>
+                <td style="padding:11px 10px;color:{{ '#1f2937' if e.activo else '#8b93a1' }};">{{ e.fecha_alta }}</td>
+                <td style="padding:11px 10px;color:{{ '#1f2937' if e.activo else '#8b93a1' }};">{{ e.fecha_baja or "—" }}</td>
+                <td style="padding:11px 18px 11px 10px;text-align:right;white-space:nowrap;">
+                  <a href="/empleados?editar_id={{ e.id }}{% if mostrar_baja %}&mostrar_baja=1{% endif %}" style="font-size:12.5px;font-weight:600;text-decoration:none;padding:4px 6px;">Editar</a>
+                  {% if e.activo %}
+                    <form action="/empleados/{{ e.id }}/baja" method="post" style="display:inline">
+                      <button type="submit" onclick="return confirm('¿Dar de baja a {{ e.nombre_completo }}?')" style="border:none;background:none;color:#b91c1c;font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 6px;">Dar de baja</button>
+                    </form>
+                  {% else %}
+                    <form action="/empleados/{{ e.id }}/reactivar" method="post" style="display:inline">
+                      <button type="submit" onclick="return confirm('¿Reactivar a {{ e.nombre_completo }}?')" style="border:none;background:none;color:#166534;font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 6px;">Reactivar</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div style="padding:12px 18px;border-top:1px solid #e6e9ee;font-size:12px;color:#8b93a1;" id="mensaje_sin_resultados_wrapper">
+          <span id="mensaje_sin_resultados" style="display:none;">No se encontraron empleados con ese nombre.</span>
+        </div>
+      </div>
+    </div>
 
-      document.getElementById("mensaje_sin_resultados").style.display = visibles === 0 ? "" : "none";
-    }
-  </script>
-</body>
-</html>
+  </div>
+</div>
+
+<script>
+  // Normaliza quitando tildes/diacríticos para que "canas" encuentre "CAÑAS".
+  function normalizarNombre(texto) {
+    return texto
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
+
+  function filtrarEmpleadosPorNombre() {
+    var texto = normalizarNombre(document.getElementById("buscador_nombre").value.trim());
+    var filas = document.querySelectorAll("table tr[data-nombre]");
+    var visibles = 0;
+
+    filas.forEach(function (fila) {
+      var coincide = normalizarNombre(fila.dataset.nombre).indexOf(texto) !== -1;
+      fila.style.display = coincide ? "" : "none";
+      if (coincide) visibles++;
+    });
+
+    document.getElementById("mensaje_sin_resultados").style.display = visibles === 0 ? "" : "none";
+  }
+</script>
+{% endblock %}

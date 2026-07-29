@@ -1,21 +1,36 @@
+"""Envío de nóminas por email vía SMTP — sustituye a `mailer_macos.py` (Mail.app/
+AppleScript, exclusivo de macOS). Usa la cuenta de email propia de cada empresa
+(credenciales en `credenciales_smtp`, ver app/db.py), nunca un servicio transaccional
+de terceros, y funciona igual en Mac, Windows y Linux: solo depende de `smtplib` de la
+librería estándar de Python.
+
+Mantiene el mismo comportamiento de modo prueba que ya existía para Mail.app: en modo
+"prueba" el destinatario se redirige a EMAIL_PRUEBA en vez de bloquear el envío (a
+diferencia de `asegurar_generacion_permitida()`, usado para el fichero SEPA) — la
+nómina cifrada se sigue generando y enviando de verdad, solo que a una dirección de
+prueba, para poder validar visualmente el resultado sin arriesgar un envío real.
+"""
+
+import smtplib
 import sqlite3
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime
+from email.message import EmailMessage
 from pathlib import Path
 
 from app.config import Configuracion, cargar_configuracion
-from app.db import obtener_empresa, registrar_envio
+from app.db import descifrar_credenciales_smtp, obtener_credenciales_smtp, obtener_empresa, registrar_envio
 
-TIMEOUT_OSASCRIPT_SEGUNDOS = 30
+PUERTO_SSL_IMPLICITO = 465
+TIMEOUT_SMTP_SEGUNDOS = 30
 
 
 class ConfiguracionInvalida(Exception):
-    """El modo de envío requiere un dato de configuración que falta."""
+    """El modo de envío, o las credenciales SMTP de la empresa, requieren un dato que falta."""
 
 
 class EnvioError(Exception):
-    """El envío de un correo concreto ha fallado (Mail.app, AppleScript, adjunto, etc.)."""
+    """El envío de un correo concreto ha fallado (conexión SMTP, autenticación, adjunto, etc.)."""
 
 
 @dataclass
@@ -28,8 +43,9 @@ class DestinatarioResuelto:
 def resolver_destinatario(email_empleado: str, config: Configuracion) -> DestinatarioResuelto:
     """Decide el destinatario real de un envío según el modo de envío configurado.
 
-    En modo "prueba", el destinatario es SIEMPRE EMAIL_PRUEBA, sin excepción,
-    para que un email real no pueda salir por accidente durante el desarrollo.
+    En modo "prueba", el destinatario es SIEMPRE EMAIL_PRUEBA, sin excepción, para que
+    un email real no pueda salir por accidente durante el desarrollo. Idéntico
+    comportamiento al que ya existía en mailer_macos.py.
     """
     if config.modo_envio == "prueba":
         if not config.email_prueba:
@@ -52,42 +68,37 @@ def nota_modo_prueba(destinatario: DestinatarioResuelto) -> str | None:
     return f"[PRUEBA] destinatario real: {destinatario.email_produccion}"
 
 
-def _escapar_applescript(texto: str) -> str:
-    return texto.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _construir_script_envio(email_destino: str, asunto: str, cuerpo: str, ruta_adjunto: str) -> str:
-    """Construye el AppleScript que compone y envía el correo desde Mail.app.
-
-    `tell application "Mail"` abre Mail.app automáticamente si estaba cerrada,
-    no hace falta comprobar si ya está en marcha.
-    """
-    email_esc = _escapar_applescript(email_destino)
-    asunto_esc = _escapar_applescript(asunto)
-    cuerpo_esc = _escapar_applescript(cuerpo)
-    ruta_esc = _escapar_applescript(ruta_adjunto)
-
-    return f'''
-tell application "Mail"
-    set nuevoMensaje to make new outgoing message with properties {{subject:"{asunto_esc}", content:"{cuerpo_esc}", visible:false}}
-    tell nuevoMensaje
-        make new to recipient at end of to recipients with properties {{address:"{email_esc}"}}
-        make new attachment with properties {{file name:(POSIX file "{ruta_esc}" as alias)}} at after last paragraph of content
-    end tell
-    send nuevoMensaje
-end tell
-'''
-
-
-def _ejecutar_applescript(script: str, timeout: int = TIMEOUT_OSASCRIPT_SEGUNDOS) -> None:
-    resultado = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
+def _construir_mensaje(remitente: str, email_destino: str, asunto: str, cuerpo: str, ruta_adjunto: Path) -> EmailMessage:
+    mensaje = EmailMessage()
+    mensaje["From"] = remitente
+    mensaje["To"] = email_destino
+    mensaje["Subject"] = asunto
+    mensaje.set_content(cuerpo)
+    mensaje.add_attachment(
+        ruta_adjunto.read_bytes(),
+        maintype="application",
+        subtype="pdf",
+        filename=ruta_adjunto.name,
     )
-    if resultado.returncode != 0:
-        raise EnvioError(resultado.stderr.strip() or "osascript devolvió un error sin detalle")
+    return mensaje
+
+
+def _enviar_via_smtp(host: str, puerto: int, usuario: str, password: str, mensaje: EmailMessage) -> None:
+    """Conecta y envía. Puerto 465 -> TLS implícito (SMTP_SSL); cualquier otro puerto
+    (587 típicamente) -> conexión en claro seguida de STARTTLS, que es lo que piden
+    tanto Gmail como Outlook/Office365. No hay lógica específica de un proveedor."""
+    try:
+        if puerto == PUERTO_SSL_IMPLICITO:
+            with smtplib.SMTP_SSL(host, puerto, timeout=TIMEOUT_SMTP_SEGUNDOS) as servidor:
+                servidor.login(usuario, password)
+                servidor.send_message(mensaje)
+        else:
+            with smtplib.SMTP(host, puerto, timeout=TIMEOUT_SMTP_SEGUNDOS) as servidor:
+                servidor.starttls()
+                servidor.login(usuario, password)
+                servidor.send_message(mensaje)
+    except (smtplib.SMTPException, OSError) as exc:
+        raise EnvioError(str(exc) or type(exc).__name__) from exc
 
 
 @dataclass
@@ -108,12 +119,14 @@ def enviar_nomina(
     mes_nomina: str,
     ruta_pdf_cifrado: str,
     config: Configuracion | None = None,
+    ruta_clave: Path | None = None,
 ) -> ResultadoEnvio:
-    """Compone y envía por Mail.app la nómina cifrada de un empleado, y registra el resultado en envios_log.
+    """Compone y envía por SMTP la nómina cifrada de un empleado, con las credenciales
+    propias de `empresa_id`, y registra el resultado en envios_log.
 
-    Cualquier fallo (Mail.app, AppleScript, adjunto inexistente, config inválida) se
-    captura aquí a propósito: esta función se llama en lote sobre ~25 nóminas y un
-    fallo individual no debe abortar el resto del envío.
+    Cualquier fallo (config inválida, credenciales SMTP ausentes, adjunto inexistente,
+    error del servidor SMTP) se captura aquí a propósito: esta función se llama en lote
+    sobre ~25 nóminas y un fallo individual no debe abortar el resto del envío.
     """
     if config is None:
         config = cargar_configuracion()
@@ -133,6 +146,14 @@ def enviar_nomina(
             raise EnvioError(f"No existe ninguna empresa con id={empresa_id}")
         nombre_empresa = empresa["nombre"]
 
+        credenciales_fila = obtener_credenciales_smtp(conn, empresa_id)
+        if credenciales_fila is None or not credenciales_fila["activa"]:
+            raise ConfiguracionInvalida(
+                f"No hay credenciales SMTP activas configuradas para '{nombre_empresa}'. "
+                "Dalas de alta con scripts/gestionar_smtp_empresa.py."
+            )
+        credenciales = descifrar_credenciales_smtp(credenciales_fila, ruta_clave=ruta_clave)
+
         nota = nota_modo_prueba(destinatario)
 
         asunto = f"Nómina {nombre_empresa} - {mes_nomina}"
@@ -147,8 +168,10 @@ def enviar_nomina(
         if nota:
             cuerpo = f"{nota}\n\n{cuerpo}"
 
-        script = _construir_script_envio(destinatario.email_envio, asunto, cuerpo, str(ruta_adjunto.resolve()))
-        _ejecutar_applescript(script)
+        mensaje = _construir_mensaje(credenciales["usuario"], destinatario.email_envio, asunto, cuerpo, ruta_adjunto)
+        _enviar_via_smtp(
+            credenciales["host"], credenciales["puerto"], credenciales["usuario"], credenciales["password"], mensaje
+        )
 
     except Exception as exc:
         detalle = str(exc) or type(exc).__name__
@@ -213,6 +236,7 @@ def enviar_lote(
     conn: sqlite3.Connection,
     nominas: list[NominaParaEnviar],
     config: Configuracion | None = None,
+    ruta_clave: Path | None = None,
 ) -> ResumenLoteEnvio:
     """Envía cada nómina de la lista, continuando aunque alguna falle, y devuelve el resumen del lote."""
     if config is None:
@@ -228,6 +252,7 @@ def enviar_lote(
             nomina.mes_nomina,
             nomina.ruta_pdf_cifrado,
             config,
+            ruta_clave,
         )
         for nomina in nominas
     ]
