@@ -108,15 +108,60 @@ Pendiente, no es trabajo de código:
       Documentos, por los problemas de sincronización ya conocidos.
 
 ### Fase 3.5 — Envío de email multiplataforma
-Se aborda después de entregar el SEPA al cliente actual, no antes ni en paralelo.
-- Sustituir el envío por Mail.app/AppleScript por SMTP (`smtplib`), usando la cuenta
-  de email propia de cada cliente (no un servicio transaccional de terceros).
-- Guardar la contraseña de aplicación del cliente cifrada con la misma capa Fernet
-  ya construida (`crypto_campos.py`).
-- Documentar el proceso de alta para que un cliente no técnico pueda generar su
-  contraseña de aplicación (Gmail, Outlook, etc.) la primera vez.
-- Mantener el mecanismo de resolución de destinatario en modo prueba que ya existe
-  para Mail.app, adaptado al nuevo envío por SMTP.
+Completa: `app/mailer_smtp.py` sustituye a `mailer_macos.py` (eliminado, recuperable en
+git), misma interfaz pública para minimizar el impacto en `main.py`. Credenciales SMTP
+por empresa en tabla `credenciales_smtp`, contraseña cifrada con la misma capa Fernet
+(`crypto_campos.py`). `resolver_destinatario()` sin tocar — modo prueba sigue
+redirigiendo, no bloqueando. Sin dependencia de macOS/AppleScript (confirmado por
+grep). `DOCUMENTO_CONTRASENA_APLICACION.md` creado para el alta no técnica en Gmail/
+Outlook. 155/155 tests pasan.
+
+Pendiente, no es trabajo de código:
+- [x] `CHECKLIST_DESPLIEGUE_PRODUCCION.md` actualizado: quitado el paso de permiso de
+      Automatización para Mail.app, añadida el alta de credenciales SMTP de las tres
+      empresas como paso obligatorio, con verificación del fallo controlado si faltan.
+      Mejora de higiene ya aplicada: la contraseña se pide de forma interactiva con
+      `getpass.getpass()` en vez de recibirse como argumento — ya no queda en el
+      historial del shell. Tests nuevos en `tests/test_gestionar_smtp_empresa.py`
+      (no existían tests para ningún script de `scripts/` hasta ahora).
+- [ ] Nota de consistencia, opcional: `scripts/gestionar_cuenta_bancaria.py` recibe
+      el IBAN/BIC como argumento de línea de comandos, con el mismo problema menor de
+      higiene que se acaba de corregir para la contraseña SMTP. Aplicar el mismo
+      cambio (entrada interactiva) si se quiere tratar con el mismo criterio.
+- [x] Confirmada la eliminación completa de `mailer_macos.py` — el nuevo método
+      (`smtplib`, librería estándar de Python) funciona igual en Mac, Windows y Linux,
+      sin dependencia añadida, así que no hace falta mantener un fallback específico
+      de macOS.
+
+### Fase 3.6 — OCR para PDFs escaneados
+La gestoría envió un mes el PDF como escaneado (sin capa de texto), caso no previsto
+hasta entonces. `app/ocr.py` ejecuta OCR local con el framework Vision de macOS (vía
+`ocrmac`, sin coste ni dependencia de nube) sobre las páginas sin texto, devolviendo
+pseudo-palabras con coordenadas en puntos PDF — mismo formato que
+`page.get_text("words")`, así que el resto del parser (`app/pdf_parser.py`) no
+distingue entre texto incrustado y OCR. Resultados cacheados en disco
+(`data/ocr_cache/`, en `.gitignore`) por hash del PDF, para no repetir el OCR (~20-30s)
+en cada reinicio con el mismo archivo.
+
+El OCR introduce errores que el texto incrustado no tiene (tildes perdidas, `D.N.I.`
+leído como `D.N.1.`, una letra de control del DNI mal reconocida): `pdf_parser.py`
+compara cabeceras de forma tolerante (normalización + `rapidfuzz`, solo aplicada a las
+cabeceras fijas, nunca a los datos extraídos) y `matcher.py` añade un tercer caso,
+`dni_dudoso_nombre_coincide` — un DNI con formato válido pero ajeno a la BD, con el
+nombre coincidiendo fuerte, se sugiere para confirmación manual en vez de descartarse
+directo; la contraseña del PDF sigue siendo siempre la de la ficha, nunca el DNI del
+PDF en ese caso. Revisado en detalle 2026-07-31: encontrado y corregido un fallo real
+(no introducido por el OCR, preexistente pero mucho más probable con él) — una fila
+`sin_match` puede traer igualmente un `empleado_id` relleno (mejor candidato fuzzy sin
+confirmar, ver `matcher.py`), y la tabla de generación del SEPA no lo excluía ni en la
+plantilla ni en el servidor, permitiendo en teoría incluir a esa persona sugerida (no
+confirmada) en un pago SEPA si tenía IBAN. Corregido en `app/main.py` y
+`app/templates/revisar.html`, con test de regresión. 168/168 tests pasan.
+
+Pendiente, no es trabajo de código:
+- [ ] `data/ocr_cache/` no tiene limpieza automática — crece con cada PDF escaneado
+      distinto que se sube a lo largo de los años. Bajo impacto (unos pocos KB por
+      página), revisar solo si algún día llega a pesar.
 
 ### Fase 4 — Preparación para comercializar (más adelante, no ahora)
 No empezar hasta que exista interés real de un segundo cliente. Incluye: catálogo de

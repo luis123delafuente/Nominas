@@ -1,4 +1,5 @@
 import os
+from dataclasses import replace
 
 import pytest
 import xmlschema
@@ -151,3 +152,32 @@ def test_generar_sepa_empleado_sin_iban_da_error_legible(client, tmp_path, monke
 
     assert respuesta.status_code == 400
     assert "IBAN" in respuesta.text
+
+
+def test_generar_sepa_rechaza_fila_sin_match_aunque_tenga_empleado_sugerido_con_iban(client, tmp_path, monkeypatch):
+    """Regresión: emparejar_nomina() puede devolver metodo='sin_match' con un
+    empleado_id relleno (el mejor candidato fuzzy, sugerido para revisión manual pero
+    NO confirmado — ver app/matcher.py). Ese candidato nunca debe poder cobrar un SEPA
+    solo porque tenga IBAN en su ficha; hace falta un match confirmado."""
+    test_client, empleado_id, empresa_id, cuenta_id = client
+    _activar_modo_produccion(monkeypatch, tmp_path)
+    _subir_pdf_de_ejemplo(test_client, empresa_id)
+
+    fila_original = main_module.estado_actual.filas[0]
+    assert fila_original.metodo == "dni_exacto"
+    assert fila_original.empleado_id == empleado_id  # tiene IBAN registrado, ver fixture `client`
+    fila_sin_match = replace(fila_original, metodo="sin_match")
+    main_module.estado_actual = replace(main_module.estado_actual, filas=[fila_sin_match])
+
+    pagina_revision = test_client.get("/revisar")
+    assert "sepa_liquido_1" not in pagina_revision.text  # la fila no debe ni aparecer en la tabla del SEPA
+
+    respuesta = test_client.post(
+        "/revisar/generar_sepa",
+        data={"cuenta_id": str(cuenta_id), "sepa_incluir": ["1"], "sepa_liquido_1": "1.572,84"},
+    )
+
+    assert respuesta.status_code == 400
+    assert "sin empleado emparejado" in respuesta.text
+    ruta_salida = tmp_path / "salida" / NIF_MEDIFORM_PLUS / "2026-06" / "SEPA_2026-06.xml"
+    assert not ruta_salida.exists()

@@ -17,6 +17,7 @@ from app.pdf_parser import (
 DNI_NIE_PATTERN = re.compile(r"^(\d{8}[A-Z]|[XYZ]\d{7}[A-Z])$")
 
 PDF_EJEMPLO = os.path.join(os.path.dirname(__file__), "..", "entrada", "NOMINAS_062026.pdf")
+PDF_EJEMPLO_ESCANEADO = os.path.join(os.path.dirname(__file__), "..", "entrada", "7_NOMINAS_072026.pdf")
 PDF_EJEMPLO_NUESTRAFARMA = os.path.join(
     os.path.dirname(__file__), "..", "entrada", "NUESTRAFARMA NOMINA_052026 v2.pdf"
 )
@@ -58,6 +59,34 @@ def test_separar_pdf_genera_un_pdf_de_una_pagina_por_nomina(tmp_path):
     assert len(rutas) == 29
     for ruta in rutas:
         assert len(PdfReader(ruta).pages) == 1
+
+
+@pytest.mark.skipif(
+    not os.path.exists(PDF_EJEMPLO_ESCANEADO),
+    reason="Requiere '7_NOMINAS_072026.pdf' en entrada/ (no versionado por ser dato sensible)",
+)
+def test_detectar_nominas_pdf_escaneado_sin_capa_de_texto():
+    """PDF escaneado (una imagen por página, sin capa de texto): el parser debe caer
+    al OCR local de macOS Vision y detectar los mismos anclajes que con texto."""
+    nominas = detectar_nominas(PDF_EJEMPLO_ESCANEADO, NIF_MEDIFORM_PLUS)
+
+    assert len(nominas) == 29
+    for anterior, actual in zip(nominas, nominas[1:]):
+        assert actual.pagina_inicio == anterior.pagina_fin + 1
+
+    for nomina in nominas:
+        assert nomina.nombre_trabajador.strip() != ""
+        # OCR no siempre lee bien un NIE (p.ej. 'Z' -> '2'): cuando el formato no es
+        # reconocible el parser devuelve None y el matcher cae al emparejamiento por
+        # nombre (con la contraseña correcta tomada de la ficha de la BD), nunca a un
+        # DNI mal leído.
+        assert nomina.dni_nie is None or DNI_NIE_PATTERN.match(nomina.dni_nie)
+
+    primera = nominas[0]
+    assert primera.nombre_trabajador == "ALCALDE LASAOSA, NICOLAS"
+    assert primera.dni_nie == "02349419S"
+    assert primera.liquido_a_percibir == "1.310,55"
+    assert extraer_mes_nomina(PDF_EJEMPLO_ESCANEADO, primera.pagina_inicio) == "2026-07"
 
 
 def test_detectar_nominas_con_nif_equivocado_informa_del_nif_real_detectado():
@@ -148,7 +177,7 @@ def test_extraer_liquido_a_percibir_devuelve_none_si_no_hay_cabecera(tmp_path):
     doc.close()
 
     doc_leido = fitz.open(str(ruta))
-    assert _extraer_liquido_a_percibir(doc_leido[0]) is None
+    assert _extraer_liquido_a_percibir(doc_leido[0].get_text("words")) is None
 
 
 def test_extraer_liquido_a_percibir_devuelve_none_si_no_hay_valor_debajo(tmp_path):
@@ -160,7 +189,7 @@ def test_extraer_liquido_a_percibir_devuelve_none_si_no_hay_valor_debajo(tmp_pat
     doc.close()
 
     doc_leido = fitz.open(str(ruta))
-    assert _extraer_liquido_a_percibir(doc_leido[0]) is None
+    assert _extraer_liquido_a_percibir(doc_leido[0].get_text("words")) is None
 
 
 def test_extraer_liquido_a_percibir_devuelve_none_si_el_valor_no_es_un_importe_valido(tmp_path):
@@ -173,7 +202,7 @@ def test_extraer_liquido_a_percibir_devuelve_none_si_el_valor_no_es_un_importe_v
     doc.close()
 
     doc_leido = fitz.open(str(ruta))
-    assert _extraer_liquido_a_percibir(doc_leido[0]) is None
+    assert _extraer_liquido_a_percibir(doc_leido[0].get_text("words")) is None
 
 
 def test_extraer_liquido_a_percibir_acepta_un_importe_valido_bajo_la_cabecera(tmp_path):
@@ -186,7 +215,7 @@ def test_extraer_liquido_a_percibir_acepta_un_importe_valido_bajo_la_cabecera(tm
     doc.close()
 
     doc_leido = fitz.open(str(ruta))
-    assert _extraer_liquido_a_percibir(doc_leido[0]) == "1.234,56"
+    assert _extraer_liquido_a_percibir(doc_leido[0].get_text("words")) == "1.234,56"
 
 
 def test_gestoria_sin_el_patron_de_liquido_no_bloquea_la_deteccion_de_nominas(tmp_path):
@@ -212,3 +241,30 @@ def test_gestoria_sin_el_patron_de_liquido_no_bloquea_la_deteccion_de_nominas(tm
     assert len(nominas) == 1
     assert nominas[0].liquido_a_percibir is None
     assert nominas[0].dni_nie == "12345678A"  # el resto del parseo no se ve afectado
+
+
+@pytest.mark.parametrize("rotulo", ["C.I.F.", "CIF", "N.I.F.", "NIF:", "CIF :"])
+def test_detectar_nominas_acepta_las_variantes_del_rotulo_del_cif(tmp_path, rotulo):
+    """La gestoría no imprime siempre 'NIF.': el rótulo del anclaje de empresa puede
+    aparecer como 'C.I.F.', 'CIF', 'N.I.F.', con ':' o '-' como separador. El parser
+    debe aceptar todas las variantes con tal de que el CIF concreto sea el esperado."""
+    ruta = tmp_path / "nomina_con_rotulo_variante.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), f"{rotulo} B82827635")
+    page.insert_text((72, 130), "TRABAJADOR/A")
+    page.insert_text((300, 130), "CATEGORIA")
+    page.insert_text((72, 145), "PERSONA, DE PRUEBA")
+    page.insert_text((72, 160), "ANTIGUEDAD")
+    page.insert_text((150, 160), "D.N.I.")
+    page.insert_text((150, 175), "12345678A")
+    page.insert_text((72, 500), "3. Cotización adicional horas extraordinarias")
+    page.insert_text((72, 515), "4. Cotización adicional de solidaridad")
+    doc.save(str(ruta))
+    doc.close()
+
+    nominas = detectar_nominas(str(ruta), "B82827635")
+
+    assert len(nominas) == 1
+    assert nominas[0].nombre_trabajador == "PERSONA, DE PRUEBA"
+    assert nominas[0].dni_nie == "12345678A"

@@ -13,6 +13,7 @@ def empleados():
     crear_empleado(conn, "Luis Francisco De La Fuente Ruiz", "02855714B", "luis@example.com", "2025-01-01")
     crear_empleado(conn, "Sonia Perez Fernandez", "99999999R", "sonia.pf@example.com", "2025-01-01")
     crear_empleado(conn, "Sonia Perez Morante", "16065449H", "sonia.pm@example.com", "2025-01-01")
+    crear_empleado(conn, "Wafah Farah Abdalla", "54413522F", "wafah@example.com", "2025-01-01")
     yield listar_empleados(conn)
     conn.close()
 
@@ -52,12 +53,36 @@ def test_dni_coincide_pero_nombre_muy_distinto_marca_alerta(empleados):
     assert resultado.score_nombre < 50
 
 
-def test_dni_no_registrado_no_cae_a_fuzzy_por_nombre(empleados):
-    # DNI con formato válido pero que no está en la BD: no se adivina por nombre.
-    resultado = emparejar_nomina("PEREZ MORANTE, SONIA", "00000000T", empleados)
+def test_dni_no_registrado_y_nombre_sin_coincidencia_sigue_siendo_sin_match(empleados):
+    # DNI con formato válido que no está en la BD y cuyo nombre no coincide con ninguna
+    # ficha: no se adivina, se marca para revisión manual.
+    resultado = emparejar_nomina("ZAPATERO GOMEZ, RODRIGO", "00000000T", empleados)
 
     assert resultado.metodo == "sin_match"
-    assert resultado.empleado is None
+    assert resultado.score_nombre < 60
+
+
+def test_dni_valido_no_registrado_pero_nombre_coincide_con_ficha_sugiere_con_alerta(empleados):
+    # DNI con formato válido pero ajeno a la BD, con nombre que sí coincide fuerte con
+    # una ficha: puede ser un DNI mal leído del PDF. Se sugiere la ficha con alerta en
+    # lugar de bloquear como "sin match" (la confirmación manual es obligatoria).
+    resultado = emparejar_nomina("PEREZ MORANTE, SONIA", "00000000T", empleados)
+
+    assert resultado.metodo == "dni_dudoso_nombre_coincide"
+    assert resultado.empleado["dni_nie"] == "16065449H"
+    assert resultado.score_nombre >= 90
+
+
+def test_dni_mal_leido_por_ocr_pero_nombre_coincide_sugiere_con_alerta(empleados):
+    # Caso real del PDF escaneado de julio: el OCR cambia la letra de control del DNI
+    # (54413522F -> 54413522E, formato válido pero inexistente en la BD). El nombre
+    # coincide con la ficha -> se sugiere con alerta; la contraseña del PDF individual
+    # irá la de la ficha (54413522F), nunca el DNI mal leído.
+    resultado = emparejar_nomina("FARAH ABDALLA, WAFAH", "54413522E", empleados)
+
+    assert resultado.metodo == "dni_dudoso_nombre_coincide"
+    assert resultado.empleado["dni_nie"] == "54413522F"
+    assert resultado.score_nombre >= 90
 
 
 # --- Fallback fuzzy por nombre: solo cuando no hay DNI extraído en esa nómina ---

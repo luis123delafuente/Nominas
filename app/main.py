@@ -71,7 +71,7 @@ class FilaRevision:
     dni_pdf: str | None
     pagina_inicio: int
     pagina_fin: int
-    metodo: str  # dni_exacto / dni_con_alerta_nombre / fuzzy_nombre / sin_match
+    metodo: str  # dni_exacto / dni_con_alerta_nombre / dni_dudoso_nombre_coincide / fuzzy_nombre / sin_match
     score_nombre: float
     empleado_id: int | None
     empleado_nombre: str | None
@@ -211,7 +211,7 @@ def _contexto_sepa(conn: sqlite3.Connection) -> dict:
     ibans_disponibles = {
         fila.empleado_id: bool(obtener_iban_empleado(conn, fila.empleado_id))
         for fila in estado_actual.filas
-        if fila.empleado_id is not None
+        if fila.empleado_id is not None and fila.metodo != "sin_match"
     }
     return {
         "cuentas_bancarias": [descifrar_cuenta_bancaria(c) for c in cuentas_raw],
@@ -391,7 +391,10 @@ async def generar_sepa(request: Request):
         for fila in estado_actual.filas:
             if fila.numero not in numeros_incluidos:
                 continue
-            if fila.empleado_id is None:
+            if fila.empleado_id is None or fila.metodo == "sin_match":
+                # "sin_match" puede traer un empleado_id relleno (mejor candidato fuzzy
+                # sugerido para revisión, ver app/matcher.py) pero nunca confirmado — no
+                # es apto para un pago SEPA, ni aunque tenga IBAN registrado.
                 errores.append(f"Fila {fila.numero}: no se puede incluir una nómina sin empleado emparejado.")
                 continue
 

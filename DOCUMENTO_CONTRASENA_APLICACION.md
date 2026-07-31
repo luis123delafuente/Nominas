@@ -43,13 +43,18 @@ sección de abajo te lleva a activarla.
 7. **Copia esa contraseña ahora mismo** (con o sin espacios, da igual) — Google solo la
    muestra una vez, no podrás volver a verla después. Si la pierdes, tendrás que crear
    una nueva repitiendo estos pasos.
-8. Pásame (a tu desarrollador) esa contraseña junto con la dirección de Gmail que vas a
-   usar para enviar las nóminas, para darla de alta en el programa. Una vez dada de
-   alta, esta contraseña se guarda cifrada — ni siquiera queda visible en la base de
-   datos del programa.
+8. **No se la des a nadie ni la escribas en ningún email, chat o mensaje** — ni siquiera
+   a tu desarrollador. La introduces tú mismo (o quien vaya a configurar el programa)
+   directamente en el ordenador donde corre la aplicación, ejecutando en una terminal:
+   ```
+   ./venv/bin/python3 scripts/gestionar_smtp_empresa.py alta <NIF_empresa> smtp.gmail.com 587 <tu_direccion_de_gmail>
+   ```
+   El programa te la pedirá justo después, sin mostrarla en pantalla mientras la
+   escribes (igual que al escribir la contraseña de un usuario en el Mac). Se guarda
+   cifrada — ni siquiera queda visible en la base de datos del programa.
 
-**Datos del servidor que necesitará el programa** (esto lo hace tu desarrollador, tú no
-tienes que anotarlo): servidor `smtp.gmail.com`, puerto `587`.
+**Datos del servidor que necesitará el comando** (no hace falta anotarlos, ya están en
+el ejemplo de arriba): servidor `smtp.gmail.com`, puerto `587`.
 
 ---
 
@@ -68,8 +73,15 @@ tienes que anotarlo): servidor `smtp.gmail.com`, puerto `587`.
    ella o te dejará escribir uno — puedes poner "Nóminas Mediform".
 6. Te mostrará una contraseña generada automáticamente. **Cópiala ahora mismo**, antes
    de cerrar esa ventana — igual que con Gmail, después ya no se puede volver a ver.
-7. Pásame (a tu desarrollador) esa contraseña junto con la dirección de Outlook/Office365
-   que vas a usar para enviar las nóminas.
+7. **No se la des a nadie ni la escribas en ningún email, chat o mensaje** — ni siquiera
+   a tu desarrollador. La introduces tú mismo (o quien vaya a configurar el programa)
+   directamente en el ordenador donde corre la aplicación, ejecutando en una terminal:
+   ```
+   ./venv/bin/python3 scripts/gestionar_smtp_empresa.py alta <NIF_empresa> smtp.office365.com 587 <tu_direccion_de_outlook>
+   ```
+   El programa te la pedirá justo después, sin mostrarla en pantalla mientras la
+   escribes. Se guarda cifrada — ni siquiera queda visible en la base de datos del
+   programa.
 
 **Nota para cuentas de empresa (Office365 gestionado por un administrador):** si tu
 cuenta la administra un departamento de IT o un administrador de Microsoft 365, puede
@@ -90,9 +102,13 @@ puerto `587`.
   verificación en dos pasos no está activada todavía — actívala primero, la opción
   aparece justo después.
 - **"El programa da un error de usuario/contraseña al enviar"**: lo más habitual es
-  haber copiado mal la contraseña de aplicación (con espacios de más, o un carácter
-  cambiado) al dársela a tu desarrollador. Genera una nueva y vuelve a pasarla,
-  no hace falta reutilizar la anterior.
+  haber escrito mal la contraseña de aplicación al introducirla (con espacios de más,
+  o un carácter cambiado). Vuelve a ejecutar el comando de alta y escríbela de nuevo con
+  cuidado — no hace falta generar una nueva salvo que ya no la tengas a mano.
+- **"He escrito o pegado la contraseña de aplicación en un chat, email o mensaje por
+  error"**: trátala como comprometida. Ve a la configuración de contraseñas de
+  aplicación de tu cuenta, elimina esa contraseña concreta y genera una nueva siguiendo
+  estos mismos pasos — no reutilices la que se ha expuesto.
 - **"He cambiado mi contraseña normal de Gmail/Outlook"**: no afecta a la contraseña de
   aplicación, siguen siendo independientes. Solo tendrás que generar una nueva contraseña
   de aplicación si tú mismo la revocas o si la cuenta pide reautorizar el acceso.

@@ -8,7 +8,9 @@ para que lo siga un cliente sin conocimientos técnicos.
 
 Uso:
     ./venv/bin/python3 scripts/gestionar_smtp_empresa.py alta B82827635 \\
-        smtp.gmail.com 587 mediformplus@gmail.com "abcd efgh ijkl mnop"
+        smtp.gmail.com 587 mediformplus@gmail.com
+    (pedirá la contraseña de aplicación de forma interactiva, sin mostrarla en pantalla)
+
     ./venv/bin/python3 scripts/gestionar_smtp_empresa.py listar B82827635
 
 Puertos habituales:
@@ -17,6 +19,7 @@ Puertos habituales:
 """
 
 import argparse
+import getpass
 import sys
 from pathlib import Path
 
@@ -72,7 +75,7 @@ def listar(nif: str) -> None:
         conn.close()
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Gestiona las credenciales SMTP de envío de una empresa.")
     subparsers = parser.add_subparsers(dest="accion", required=True)
 
@@ -81,14 +84,21 @@ if __name__ == "__main__":
     p_alta.add_argument("host")
     p_alta.add_argument("puerto", type=int)
     p_alta.add_argument("usuario")
-    p_alta.add_argument("password")
 
     p_listar = subparsers.add_parser("listar")
     p_listar.add_argument("nif")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.accion == "alta":
-        alta(args.nif, args.host, args.puerto, args.usuario, args.password)
+        # La contraseña de aplicación se pide de forma interactiva (sin eco en
+        # pantalla, como con `sudo`) para que nunca quede en el historial del shell
+        # ni visible en la terminal.
+        password = getpass.getpass("Contraseña de aplicación (no se mostrará en pantalla): ")
+        alta(args.nif, args.host, args.puerto, args.usuario, password)
     elif args.accion == "listar":
         listar(args.nif)
+
+
+if __name__ == "__main__":
+    main()

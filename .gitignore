@@ -12,3 +12,5 @@ logs/*.log
 
 config.local.py
 *.xlsx
+
+data/ocr_cache/

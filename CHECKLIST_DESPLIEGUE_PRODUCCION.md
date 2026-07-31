@@ -1,4 +1,4 @@
-# Checklist de despliegue a producción — Nóminas MEDIFORM PLUS (Fase 3)
+# Checklist de despliegue a producción — Nóminas MEDIFORM PLUS (Fases 3 y 3.5)
 
 Para pasar de modo prueba a modo producción en el Mac del cliente de forma segura,
 tanto para el envío de email como para la generación del fichero SEPA. Pensado para
@@ -78,7 +78,7 @@ el arranque en el despliegue original.
 
 ---
 
-## 3. Bloqueos de seguridad de macOS — los tres que ya nos bloquearon antes
+## 3. Bloqueos de seguridad de macOS — los dos que ya nos bloquearon antes
 
 ### 3.1 Gatekeeper / "no se puede abrir porque es de un desarrollador no identificado"
 
@@ -93,30 +93,18 @@ cuarentena, incluido `Iniciar_App.command` (un script no firmado).
   `xattr -cr ~/Aplicaciones-Locales/nominas-mediformplus` (quita la cuarentena de toda
   la carpeta de una vez).
 
-### 3.2 Permiso de Automatización para controlar Mail.app
+### 3.2 Puerto 8001 ocupado por un proceso anterior que no se cerró bien
 
-El envío de correo usa AppleScript (`osascript`) para controlar Mail.app. La primera
-vez que se intenta enviar una nómina, macOS muestra un diálogo pidiendo permiso a
-"Terminal" (o a la app que ejecuta el script) para controlar "Mail". Si se rechaza o se
-ignora ese diálogo, los envíos fallan en silencio con un error de AppleScript.
-
-- [ ] Aceptar explícitamente ese diálogo la primera vez que se pruebe un envío (aunque
-  sea en modo prueba).
-- [ ] Si se rechazó por error, o si no aparece porque un permiso previo quedó denegado:
-  Ajustes del Sistema → Privacidad y Seguridad → Automatización → buscar "Terminal" (o
-  la app correspondiente) en la lista → activar la casilla junto a "Mail".
-- [ ] Confirmar con un envío de prueba real (modo prueba, ver sección 4) que el correo
-  llega a `EMAIL_PRUEBA` con el PDF adjunto y cifrado.
-
-### 3.3 Puerto 8000 ocupado por un proceso anterior que no se cerró bien
-
-Si una sesión anterior de la app no se cerró limpiamente (se cerró la ventana de
-Terminal en vez de pulsar Ctrl+C), el proceso de `uvicorn` puede quedar "zombie"
-ocupando el puerto 8000, y el siguiente arranque falla o parece no hacer nada.
+`Iniciar_App.command` arranca en el puerto **8001** (cambiado desde el 8000 original
+para evitar coincidir con otros servicios que puedan estar ya escuchando ahí). Si una
+sesión anterior de la app no se cerró limpiamente (se cerró la ventana de Terminal en
+vez de pulsar Ctrl+C), el proceso de `uvicorn` puede quedar "zombie" ocupando ese
+puerto, y el siguiente arranque falla o parece no hacer nada.
 
 - [ ] Si `Iniciar_App.command` no abre nada en el navegador tras unos segundos:
-  `lsof -i :8000` en Terminal para ver si hay un proceso Python ya escuchando ahí, y
-  si lo hay, `kill <PID>` antes de reintentar.
+  `lsof -i :8001` en Terminal para ver si hay un proceso Python ya escuchando ahí, y
+  si lo hay, `kill <PID>` antes de reintentar. Si por lo que sea `Iniciar_App.command`
+  se ha vuelto a cambiar a otro puerto, sustituye el número en este mismo comando.
 
 ---
 
@@ -135,6 +123,21 @@ antes de mover dinero o datos reales de los tres empleados/empresas.
 - [ ] Dar de alta una cuenta bancaria real por empresa con
   `scripts/gestionar_cuenta_bancaria.py alta <NIF> <IBAN> <BIC>` — el IBAN/BIC reales
   de cada empresa, no valores inventados.
+- [ ] **Dar de alta las credenciales SMTP de las tres empresas** (MEDIFORM PLUS S.L.,
+  MEDIFORMPLUS FORMACION SL, NUESTRAFARMA PLUS SL) — sin esto el envío de email no
+  puede funcionar en producción, aunque todo lo demás esté configurado. Primero generar
+  la "contraseña de aplicación" en el proveedor de email de cada empresa (Gmail u
+  Outlook/Office365) siguiendo `DOCUMENTO_CONTRASENA_APLICACION.md`, y luego darla de
+  alta con:
+  ```
+  ./venv/bin/python3 scripts/gestionar_smtp_empresa.py alta <NIF> <host_smtp> <puerto> <usuario_email>
+  ```
+  el comando pedirá la contraseña de aplicación de forma interactiva (sin mostrarla en
+  pantalla, como al escribir `sudo`) — nunca se escribe como parte del comando, así que
+  no queda guardada en el historial del shell. Repetir una vez por empresa (cada una
+  puede tener su propia cuenta de envío).
+  Verificar el resultado con `scripts/gestionar_smtp_empresa.py listar <NIF>` — debe
+  mostrar el host/usuario correctos y nunca la contraseña en claro.
 - [ ] Importar o dar de alta los empleados reales (con su email real e IBAN real si se
   va a probar también el SEPA).
 - [ ] Subir un PDF real de una gestoría, confirmar en la pantalla de revisión que:
@@ -145,6 +148,12 @@ antes de mover dinero o datos reales de los tres empleados/empresas.
 - [ ] Confirmar el envío de esa nómina de prueba: el correo debe llegar a
   `EMAIL_PRUEBA`, con el asunto marcado `[PRUEBA] destinatario real: ...`, el PDF
   adjunto se abre con la contraseña (DNI) correcta.
+- [ ] **Saber identificar el fallo si a alguna empresa se le olvidó dar de alta las
+  credenciales SMTP** (paso anterior): el envío para esa empresa falla de forma
+  controlada y visible, nunca en silencio — queda registrado en `envios_log` con
+  `estado = 'error'` y un `detalle` que menciona explícitamente "credenciales SMTP".
+  Si un envío real no llega, es el primer sitio donde mirar antes de sospechar de otra
+  cosa (contraseña de aplicación caducada, proveedor bloqueando el envío, etc.).
 - [ ] Generar el fichero SEPA de esa misma empresa en modo prueba: debe **fallar** con
   el mensaje `GeneracionBloqueadaPorModoPrueba` y **no** debe aparecer ningún
   `SEPA_*.xml` en `salida/<NIF>/<mes>/`. Si se genera igualmente, **no continuar** —

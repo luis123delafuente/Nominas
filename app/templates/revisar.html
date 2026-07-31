@@ -6,6 +6,7 @@
 {% set estado_meta = {
   "dni_exacto": {"icon": "✓", "text": "DNI exacto", "bg": "#eafaf0", "border": "#bfe5cb", "color": "#166534", "dot": "#16a34a"},
   "dni_con_alerta_nombre": {"icon": "⚠", "text": "DNI ok, nombre no cuadra", "bg": "#fdf3de", "border": "#f3d9a4", "color": "#92400e", "dot": "#d97706"},
+  "dni_dudoso_nombre_coincide": {"icon": "⚠", "text": "DNI no cuadra, nombre sí", "bg": "#fdf3de", "border": "#f3d9a4", "color": "#92400e", "dot": "#d97706"},
   "fuzzy_nombre": {"icon": "🔎", "text": "Solo por nombre, sin DNI", "bg": "#fdf3de", "border": "#f3d9a4", "color": "#92400e", "dot": "#d97706"},
   "sin_match": {"icon": "✕", "text": "Sin match — revisar ficha", "bg": "#fbe9e9", "border": "#f0c6c6", "color": "#991b1b", "dot": "#dc2626"},
 } %}
@@ -118,6 +119,12 @@
                     <span style="font-size:11.5px;color:#7a4a00;line-height:1.4;">PDF: "{{ fila.nombre_pdf }}" vs. ficha: "{{ fila.empleado_nombre }}"</span>
                   </div>
                 {% endif %}
+                {% if fila.metodo == "dni_dudoso_nombre_coincide" %}
+                  <div style="display:flex;gap:6px;align-items:flex-start;background:#fdf3de;border:1px solid #f3d9a4;border-radius:5px;padding:6px 8px;margin-top:6px;max-width:280px;">
+                    <span style="color:#92400e;font-size:12px;flex-shrink:0;">⚠</span>
+                    <span style="font-size:11.5px;color:#7a4a00;line-height:1.4;">DNI del PDF ({{ fila.dni_pdf }}) no coincide con el de la ficha ({{ fila.empleado_dni }}) — confirma que es la misma persona antes de incluir.</span>
+                  </div>
+                {% endif %}
                 {% if fila.envio_previo_fecha %}
                   <div style="display:flex;gap:6px;align-items:flex-start;background:#eaf1fd;border:1px solid #cfe0f7;border-radius:5px;padding:6px 8px;margin-top:6px;max-width:260px;">
                     <span style="color:#1d4ed8;font-size:12px;flex-shrink:0;">📨</span>
@@ -204,7 +211,7 @@
           </thead>
           <tbody>
             {% for fila in filas %}
-              {% if fila.empleado_id is not none %}
+              {% if fila.empleado_id is not none and fila.metodo != "sin_match" %}
                 {% set tiene_iban = ibans_disponibles.get(fila.empleado_id, false) %}
                 <tr style="border-bottom:1px solid #f0f2f5;">
                   <td style="padding:10px 10px 10px 18px;vertical-align:top;font-weight:600;color:#1f2937;">{{ fila.empleado_nombre }}</td>

@@ -20,7 +20,7 @@
     {% endif %}
 
     <div style="background:#fff;border:1px solid #d7dde5;border-radius:8px;box-shadow:0 1px 2px rgba(15,23,42,0.06);padding:32px;">
-      <form action="/subir" method="post" enctype="multipart/form-data">
+      <form action="/subir" method="post" enctype="multipart/form-data" onsubmit="return prepararEnvio()">
 
         <div style="margin-bottom:22px;">
           <label for="empresa_id" style="display:block;font-size:13px;font-weight:600;color:#1f2937;margin-bottom:6px;">Empresa</label>
@@ -47,7 +47,13 @@
           <span style="font-size:12.5px;color:#375a86;line-height:1.5;">El mes de la nómina se detecta automáticamente a partir del contenido del PDF. Podrás corregirlo en el siguiente paso si no fuese correcto.</span>
         </div>
 
-        <button type="submit" style="margin-top:24px;width:100%;padding:12px;background:#14213d;color:#fff;border:none;border-radius:6px;font-size:14.5px;font-weight:700;cursor:pointer;">Subir y analizar →</button>
+        <button type="submit" id="btn_subir" style="margin-top:24px;width:100%;padding:12px;background:#14213d;color:#fff;border:none;border-radius:6px;font-size:14.5px;font-weight:700;cursor:pointer;">Subir y analizar →</button>
+
+        <div id="caja_analizando" style="display:none;align-items:center;gap:10px;margin-top:16px;background:#eef4fb;border:1px solid #d3e3f5;border-radius:6px;padding:12px 14px;">
+          <span style="width:14px;height:14px;border:2.5px solid #d3e3f5;border-top-color:#1d4ed8;border-radius:50%;animation:giro 0.8s linear infinite;flex-shrink:0;"></span>
+          <span style="font-size:13px;color:#375a86;line-height:1.5;">Analizando el PDF… si es un escaneado puede tardar unos 30 segundos. No cierres esta página.</span>
+        </div>
+        <style>@keyframes giro { to { transform: rotate(360deg); } }</style>
       </form>
     </div>
 
@@ -57,4 +63,18 @@
 
   </div>
 </div>
+
+<script>
+  function prepararEnvio() {
+    var fichero = document.getElementById('pdf');
+    if (!fichero.files || !fichero.files[0]) {
+      return false;
+    }
+    var boton = document.getElementById('btn_subir');
+    boton.disabled = true;
+    boton.textContent = 'Analizando…';
+    document.getElementById('caja_analizando').style.display = 'flex';
+    return true;
+  }
+</script>
 {% endblock %}

@@ -37,7 +37,7 @@ def _mejor_candidato_por_nombre(nombre_normalizado: str, empleados):
 @dataclass
 class ResultadoMatch:
     empleado: object | None  # fila del empleado emparejado (o candidato sugerido), o None
-    metodo: str  # "dni_exacto" / "dni_con_alerta_nombre" / "fuzzy_nombre" / "sin_match"
+    metodo: str  # "dni_exacto" / "dni_con_alerta_nombre" / "dni_dudoso_nombre_coincide" / "fuzzy_nombre" / "sin_match"
     score_nombre: float  # similitud de nombre, siempre informado aunque el match sea por DNI
 
 
@@ -52,7 +52,11 @@ def emparejar_nomina(
     Prioridad:
       1. DNI exacto -> es esa persona, sin ambigüedad (con alerta si el nombre no cuadra).
       2. Si la nómina no traía un DNI con formato reconocible, fallback a fuzzy por nombre.
-      3. Si el DNI no coincide con ningún empleado, no se adivina por nombre: sin_match.
+      3. Si trae un DNI con formato válido que no está en la BD, puede ser un DNI mal
+         leído del PDF (p.ej. el OCR cambia la letra de control, 54413522F -> 54413522E):
+         si el nombre coincide fuerte con una ficha, se sugiere esa ficha con alerta
+         (`dni_dudoso_nombre_coincide`) para confirmación manual. Sin esa coincidencia,
+         sin_match.
     """
     empleados = list(empleados)
     nombre_normalizado = _normalizar_nombre(nombre_pdf)
@@ -67,9 +71,18 @@ def emparejar_nomina(
             metodo = "dni_exacto" if score >= UMBRAL_ALERTA_NOMBRE else "dni_con_alerta_nombre"
             return ResultadoMatch(empleado=empleado_por_dni, metodo=metodo, score_nombre=score)
 
-        # DNI con formato válido pero que no corresponde a ningún empleado de la BD:
-        # no se cae a fuzzy por nombre, se marca directamente para revisión manual.
-        return ResultadoMatch(empleado=None, metodo="sin_match", score_nombre=0.0)
+        # DNI con formato válido pero que no corresponde a ningún empleado de la BD.
+        # Puede ser un DNI mal leído del PDF (el OCR cambia a veces la letra de control,
+        # p.ej. 54413522F -> 54413522E). Si el nombre coincide fuerte con una ficha, se
+        # sugiere con alerta para confirmación manual — nunca se usa el DNI del PDF como
+        # contraseña en ese caso (lo decide main.py con `empleado_dni`). Sin coincidencia
+        # fuerte de nombre, sin_match.
+        mejor_empleado, mejor_score = _mejor_candidato_por_nombre(nombre_normalizado, empleados)
+        if mejor_score >= umbral_fuzzy:
+            return ResultadoMatch(
+                empleado=mejor_empleado, metodo="dni_dudoso_nombre_coincide", score_nombre=mejor_score
+            )
+        return ResultadoMatch(empleado=mejor_empleado, metodo="sin_match", score_nombre=mejor_score)
 
     mejor_empleado, mejor_score = _mejor_candidato_por_nombre(nombre_normalizado, empleados)
     if mejor_score >= umbral_fuzzy:
