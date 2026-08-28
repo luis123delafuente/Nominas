@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mediformplus.nominas</string>
+
+    <!-- El marcador de ruta lo sustituye scripts/instalar_launch_agent.sh por la ruta
+         real del proyecto en este Mac. No editar este archivo a mano: es la plantilla
+         versionada, el .plist real vive en ~/Library/LaunchAgents/ y no está en git. -->
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__RUTA_PROYECTO__/venv/bin/python3</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>app.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8001</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__RUTA_PROYECTO__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__RUTA_PROYECTO__/logs/launchagent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__RUTA_PROYECTO__/logs/launchagent_error.log</string>
+</dict>
+</plist>

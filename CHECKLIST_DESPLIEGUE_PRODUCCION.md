@@ -75,6 +75,19 @@ el arranque en el despliegue original.
   conviene comprobarlo la primera vez en un Mac nuevo.
 - [ ] Arrancar una vez a mano para confirmar que no hay errores de import:
   `./venv/bin/python3 -c "import app.main"` antes de usar `Iniciar_App.command`.
+- [ ] Instalar el LaunchAgent para que el servidor quede corriendo permanentemente en
+  segundo plano (arranca solo al iniciar sesión, se reinicia solo si se cae), en vez de
+  depender de que alguien lo arranque a mano cada mañana:
+  ```
+  ./scripts/instalar_launch_agent.sh
+  ```
+  Sigue enlazado solo a `127.0.0.1` (nunca accesible desde otros equipos de la red del
+  cliente, ver `CLAUDE.md`) — conviene comprobarlo de un vistazo la primera vez con
+  `cat ~/Library/LaunchAgents/com.mediformplus.nominas.plist`. Con esto
+  instalado, `Iniciar_App.command` pasa a limitarse a abrir el navegador (detecta solo
+  si el servidor ya responde en el puerto 8001); si por lo que sea no está instalado el
+  LaunchAgent, sigue arrancando el servidor él mismo como hacía antes, así que no pasa
+  nada si se salta este paso.
 
 ---
 
